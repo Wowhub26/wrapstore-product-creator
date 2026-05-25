@@ -142,7 +142,7 @@ export async function getMetaobjectsByType(admin: ShopifyAdminClient, type: stri
           node.fields.find((field) => ["title", "titolo", "name", "nome"].includes(field.key))
             ?.value ||
           node.handle,
-        value: node.id,
+        value: node.handle || node.displayName,
         handle: node.handle,
       })),
     );

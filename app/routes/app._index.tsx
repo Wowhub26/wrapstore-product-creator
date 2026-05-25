@@ -84,11 +84,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     heightError = error instanceof Error ? error.message : "Errore recuperando le altezze.";
   }
 
+  const draft = latestDraft?.payload
+    ? normalizeDraftHeights(latestDraft.payload as ProductCreatorPayload, heights)
+    : null;
+
   return {
     collections,
     heights,
     heightError,
-    draft: latestDraft?.payload as ProductCreatorPayload | null,
+    draft,
     draftId: latestDraft?.id,
     limits: {
       maxImages: Number(process.env.MAX_PRODUCT_IMAGES ?? 24),
@@ -757,6 +761,21 @@ function mergeSpecs(specs?: ProductSpecInput[]) {
     ...field,
     value: specs?.find((spec) => spec.key === field.key)?.value ?? "",
   }));
+}
+
+function normalizeDraftHeights(
+  draft: ProductCreatorPayload,
+  availableHeights: HeightInput[],
+): ProductCreatorPayload {
+  if (!draft.heights?.length || !availableHeights.length) return draft;
+
+  return {
+    ...draft,
+    heights: draft.heights.map((selected) => {
+      const current = availableHeights.find((height) => height.id === selected.id);
+      return current ?? selected;
+    }),
+  };
 }
 
 function validateStep(step: number, payload: ProductCreatorPayload) {

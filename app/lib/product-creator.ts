@@ -151,7 +151,7 @@ export const productCreatorPayloadSchema = z
         context.addIssue({
           code: "custom",
           path: ["images"],
-          message: `SKU variante duplicato: ${sku}.`,
+          message: `SKU variante duplicato: ${sku}. Usa SKU colore diversi oppure lascia vuoto lo SKU colore.`,
         });
       });
     }
