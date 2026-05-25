@@ -551,23 +551,32 @@ function FilmStep({
 
       <label>
         Altezza
-        <select
-          multiple
-          onChange={(event) => {
-            const selected = [...event.currentTarget.selectedOptions].map((option) => {
-              const height = heights.find((item) => item.id === option.value);
-              return height ?? { id: option.value, label: option.textContent ?? option.value };
-            });
-            onSetHeights(selected);
-          }}
-          value={payload.heights.map((height) => height.id)}
-        >
-          {heights.map((height) => (
-            <option key={height.id} value={height.id}>
-              {height.label}
-            </option>
-          ))}
-        </select>
+        <div className="height-options" role="group" aria-label="Altezze disponibili">
+          {heights.length ? (
+            heights.map((height) => {
+              const selected = payload.heights.some((item) => item.id === height.id);
+              return (
+                <button
+                  aria-pressed={selected}
+                  className={selected ? "height-option is-selected" : "height-option"}
+                  key={height.id}
+                  onClick={() => {
+                    onSetHeights(
+                      selected
+                        ? payload.heights.filter((item) => item.id !== height.id)
+                        : [...payload.heights, height],
+                    );
+                  }}
+                  type="button"
+                >
+                  {height.label}
+                </button>
+              );
+            })
+          ) : (
+            <p className="empty">Nessuna altezza disponibile.</p>
+          )}
+        </div>
       </label>
       {heightError ? <div className="notice notice--error">{heightError}</div> : null}
     </div>
@@ -878,6 +887,9 @@ const styles = `
   label { display: grid; gap: 6px; font-size: 13px; font-weight: 650; color: #3f4750; }
   input, select { width: 100%; border: 1px solid #c9ced6; border-radius: 6px; padding: 10px 12px; font: inherit; background: #fff; box-sizing: border-box; }
   select[multiple] { min-height: 150px; }
+  .height-options { border: 1px solid #c9ced6; border-radius: 8px; padding: 10px; display: flex; flex-wrap: wrap; gap: 8px; min-height: 56px; align-items: flex-start; background: #fff; }
+  .height-option { border-color: #c9ced6; background: #fff; color: #202223; min-height: 36px; }
+  .height-option.is-selected { border-color: #008060; background: #f0f8f5; color: #005e46; box-shadow: inset 0 0 0 1px #008060; }
   .check { align-content: end; grid-template-columns: auto 1fr; align-items: center; }
   .check input { width: auto; }
   .notice { border-radius: 8px; padding: 12px 14px; margin-bottom: 14px; border: 1px solid #c9ced6; background: #f7f8f9; }

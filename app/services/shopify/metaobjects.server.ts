@@ -43,6 +43,31 @@ const METAOBJECT_DEFINITION_BY_TYPE = `#graphql
   }
 `;
 
+const METAOBJECT_DEFINITION_BY_ID = `#graphql
+  query GuidedProductMetaobjectDefinitionById($id: ID!) {
+    metaobjectDefinition(id: $id) {
+      id
+      type
+    }
+  }
+`;
+
+const METAOBJECT_DEFINITIONS = `#graphql
+  query GuidedProductMetaobjectDefinitions($cursor: String) {
+    metaobjectDefinitions(first: 100, after: $cursor) {
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+      nodes {
+        id
+        name
+        type
+      }
+    }
+  }
+`;
+
 const METAOBJECT_CREATE = `#graphql
   mutation GuidedProductMetaobjectCreate($metaobject: MetaobjectCreateInput!) {
     metaobjectCreate(metaobject: $metaobject) {
@@ -69,17 +94,19 @@ export type HeightOption = {
 
 export async function getHeightOptions(admin: ShopifyAdminClient): Promise<HeightOption[]> {
   const definition = await getProductMetafieldDefinition(admin, "custom", "altezza");
-  const metaobjectType =
-    process.env.ALTEZZA_METAOBJECT_TYPE ||
-    definition?.validations.find((validation) =>
-      ["metaobject_definition_type", "metaobject_type"].includes(validation.name),
-    )?.value;
 
   if (!definition) {
     throw new Error(
       "Metafield custom.altezza non trovato. Verifica la definizione nel pannello Shopify.",
     );
   }
+
+  const metaobjectType = await resolveMetaobjectTypeForDefinition(
+    admin,
+    definition,
+    process.env.ALTEZZA_METAOBJECT_TYPE,
+    ["altezza", "height"],
+  );
 
   if (!definition.type.name.includes("metaobject_reference") || !metaobjectType) {
     throw new Error(
@@ -126,6 +153,74 @@ export async function getMetaobjectsByType(admin: ShopifyAdminClient, type: stri
   } while (cursor);
 
   return options;
+}
+
+async function resolveMetaobjectTypeForDefinition(
+  admin: ShopifyAdminClient,
+  definition: {
+    validations: Array<{ name: string; value: string }>;
+  },
+  envType: string | undefined,
+  fallbackHints: string[] = [],
+) {
+  if (envType) return envType;
+
+  const typeValidation = definition.validations.find((validation) =>
+    ["metaobject_definition_type", "metaobject_type"].includes(validation.name),
+  );
+  if (typeValidation?.value) return typeValidation.value;
+
+  const idValidation = definition.validations.find((validation) =>
+    ["metaobject_definition_id", "metaobject_definition"].includes(validation.name),
+  );
+  if (idValidation?.value?.startsWith("gid://shopify/MetaobjectDefinition/")) {
+    const data = await shopifyGraphql<{
+      metaobjectDefinition: { type: string } | null;
+    }>(admin, METAOBJECT_DEFINITION_BY_ID, { id: idValidation.value });
+
+    if (data.metaobjectDefinition?.type) return data.metaobjectDefinition.type;
+  }
+
+  return inferMetaobjectTypeFromDefinitions(admin, fallbackHints);
+}
+
+async function inferMetaobjectTypeFromDefinitions(
+  admin: ShopifyAdminClient,
+  hints: string[],
+): Promise<string | undefined> {
+  const normalizedHints = hints.map((hint) => hint.toLowerCase());
+  let cursor: string | null = null;
+  const matches: Array<{ type: string }> = [];
+
+  do {
+    type MetaobjectDefinitionsResponse = {
+      metaobjectDefinitions: {
+        pageInfo: { hasNextPage: boolean; endCursor: string | null };
+        nodes: Array<{ name: string; type: string }>;
+      };
+    };
+
+    const data: MetaobjectDefinitionsResponse = await shopifyGraphql(
+      admin,
+      METAOBJECT_DEFINITIONS,
+      { cursor },
+    );
+
+    matches.push(
+      ...data.metaobjectDefinitions.nodes.filter(
+        (definition: { name: string; type: string }) => {
+          const haystack = `${definition.name} ${definition.type}`.toLowerCase();
+          return normalizedHints.some((hint) => haystack.includes(hint));
+        },
+      ),
+    );
+
+    cursor = data.metaobjectDefinitions.pageInfo.hasNextPage
+      ? data.metaobjectDefinitions.pageInfo.endCursor
+      : null;
+  } while (cursor);
+
+  return matches.length === 1 ? matches[0].type : undefined;
 }
 
 export async function createProductSpecEntries(

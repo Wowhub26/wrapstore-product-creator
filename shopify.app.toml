@@ -1,7 +1,7 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
-client_id = "b1421b1709367593447051eaaf25c6cb"
-name = "Wrapstore Product Creator"
+client_id = "2a215e4e74664ccc1d844a03d12bc3dd"
+name = "Crea Nuovo Prodotto"
 application_url = "https://wrapstore-product-creator.onrender.com"
 embedded = true
 
@@ -29,5 +29,5 @@ use_legacy_install_flow = false
 redirect_urls = [
   "https://wrapstore-product-creator.onrender.com/auth/callback",
   "https://wrapstore-product-creator.onrender.com/auth/shopify/callback",
-  "https://wrapstore-product-creator.onrender.com/api/auth/callback"
+  "https://wrapstore-product-creator.onrender.com/api/auth/callback",
 ]
