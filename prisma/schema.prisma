@@ -1,0 +1,93 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Note that some adapters may set a maximum length for the String type by default, please ensure your strings are long
+// enough when changing adapters.
+// See https://www.prisma.io/docs/orm/reference/prisma-schema-reference#string for more information
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Session {
+  id            String    @id
+  shop          String
+  state         String
+  isOnline      Boolean   @default(false)
+  scope         String?
+  expires       DateTime?
+  accessToken   String
+  userId        BigInt?
+  firstName     String?
+  lastName      String?
+  email         String?
+  accountOwner  Boolean   @default(false)
+  locale        String?
+  collaborator  Boolean?  @default(false)
+  emailVerified Boolean?  @default(false)
+  refreshToken        String?
+  refreshTokenExpires DateTime?
+}
+
+model ProductDraft {
+  id              String              @id @default(cuid())
+  shop            String
+  title           String?
+  category        String?
+  brand           String?
+  collectionId    String?
+  collectionTitle String?
+  collectionType  String?
+  publishNow      Boolean             @default(false)
+  selectedHeights Json?
+  specs           Json?
+  accessorySku    String?
+  pdfFileName     String?
+  pdfMimeType     String?
+  pdfSize         Int?
+  pdfDataUrl      String?
+  payload         Json?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  images          ProductDraftImage[]
+
+  @@index([shop, updatedAt])
+}
+
+model ProductDraftImage {
+  id             String       @id @default(cuid())
+  draftId        String
+  fileName       String
+  mimeType       String
+  size           Int
+  colorName      String
+  colorSku       String?
+  previewDataUrl String?
+  position       Int          @default(0)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  draft          ProductDraft @relation(fields: [draftId], references: [id], onDelete: Cascade)
+
+  @@index([draftId, position])
+}
+
+model OperationLog {
+  id              String   @id @default(cuid())
+  shop            String
+  draftId         String?
+  productId       String?
+  operation       String
+  status          String
+  userMessage     String?
+  technicalDetail Json?
+  createdAt       DateTime @default(now())
+
+  @@index([shop, createdAt])
+  @@index([draftId, createdAt])
+  @@index([productId, createdAt])
+}

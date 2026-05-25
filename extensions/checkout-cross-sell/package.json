@@ -1,0 +1,12 @@
+{
+  "name": "checkout-cross-sell",
+  "version": "0.0.1",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "module",
+  "dependencies": {
+    "@preact/signals": "^2.9.0",
+    "@shopify/ui-extensions": "2026.4.0",
+    "preact": "^10.29.1"
+  }
+}

@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: wrapstore-product-creator
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run render-build
+    startCommand: npm run render-start
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: 22.18.0
+      - key: SHOPIFY_API_KEY
+        sync: false
+      - key: SHOPIFY_API_SECRET
+        sync: false
+      - key: SCOPES
+        value: read_products,write_products,read_files,write_files,read_metaobjects,write_metaobjects,read_metaobject_definitions,write_metaobject_definitions,read_cart_transforms,write_cart_transforms
+      - key: SHOPIFY_API_VERSION
+        value: "2026-04"
+      - key: SHOPIFY_APP_URL
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_URL
+        sync: false
+      - key: MAX_PRODUCT_IMAGES
+        value: "24"
+      - key: MAX_PRODUCT_PDF_MB
+        value: "20"

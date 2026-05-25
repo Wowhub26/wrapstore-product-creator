@@ -1,0 +1,15 @@
+api_version = "2026-01"
+
+[[extensions]]
+type = "ui_extension"
+name = "Checkout cross-sell"
+handle = "checkout-cross-sell"
+uid = "d0a37f90-72ce-4c12-9bd0-4bd8b30d9c0a"
+
+  [[extensions.targeting]]
+  target = "purchase.checkout.block.render"
+  module = "./src/Checkout.tsx"
+
+  [extensions.capabilities]
+  api_access = true
+
