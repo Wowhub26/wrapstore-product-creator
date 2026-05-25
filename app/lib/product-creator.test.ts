@@ -51,6 +51,42 @@ describe("product creator utilities", () => {
     expect(variant.sku).toBe("RS");
   });
 
+  it("disambiguates repeated color SKUs with the color slug", () => {
+    const variants = generateFilmVariants(
+      [
+        { fileName: "yellow-1.jpg", colorName: "Traffic Yellow_1", colorSku: "98814" },
+        { fileName: "yellow-2.jpg", colorName: "Traffic Yellow_2", colorSku: "98814" },
+      ],
+      [
+        { id: "h1", label: "76 Cm" },
+        { id: "h2", label: "51 Cm" },
+      ],
+    );
+
+    expect(variants.map((variant) => variant.sku)).toEqual([
+      "98814-traffic-yellow-1-76-cm",
+      "98814-traffic-yellow-1-51-cm",
+      "98814-traffic-yellow-2-76-cm",
+      "98814-traffic-yellow-2-51-cm",
+    ]);
+    expect(findDuplicateVariantSkus(variants)).toEqual([]);
+  });
+
+  it("disambiguates repeated color SKUs when there is only one height", () => {
+    const variants = generateFilmVariants(
+      [
+        { fileName: "yellow-1.jpg", colorName: "Traffic Yellow_1", colorSku: "98814" },
+        { fileName: "yellow-2.jpg", colorName: "Traffic Yellow_2", colorSku: "98814" },
+      ],
+      [{ id: "h1", label: "76 Cm" }],
+    );
+
+    expect(variants.map((variant) => variant.sku)).toEqual([
+      "98814-traffic-yellow-1",
+      "98814-traffic-yellow-2",
+    ]);
+  });
+
   it("validates required Pellicole data and duplicates", () => {
     const result = productCreatorPayloadSchema.safeParse({
       collectionId: "gid://shopify/Collection/1",

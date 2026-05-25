@@ -176,12 +176,22 @@ export function generateFilmVariants(
   images: Pick<ColorImageInput, "colorName" | "colorSku" | "fileName">[],
   heights: Pick<HeightInput, "id" | "label" | "value" | "handle">[],
 ): GeneratedVariant[] {
+  const duplicateBaseSkus = new Set(findDuplicateValues(
+    images.map((image) => image.colorSku ?? "").filter(Boolean),
+  ));
+
   return images.flatMap((image) =>
     heights.map((height) => {
       const baseSku = image.colorSku?.trim();
       const heightSlug = slugifyHandle(height.value || height.handle || height.label);
-      const sku =
-        !baseSku ? "" : heights.length === 1 ? baseSku : `${baseSku}-${heightSlug}`;
+      const colorSlug = slugifyHandle(image.colorName);
+      const sku = buildVariantSku({
+        baseSku,
+        colorSlug,
+        heightSlug,
+        hasDuplicateBaseSku: Boolean(baseSku && duplicateBaseSkus.has(baseSku)),
+        heightCount: heights.length,
+      });
 
       return {
         colorName: image.colorName,
@@ -195,6 +205,30 @@ export function generateFilmVariants(
       };
     }),
   );
+}
+
+function buildVariantSku({
+  baseSku,
+  colorSlug,
+  heightSlug,
+  hasDuplicateBaseSku,
+  heightCount,
+}: {
+  baseSku?: string;
+  colorSlug: string;
+  heightSlug: string;
+  hasDuplicateBaseSku: boolean;
+  heightCount: number;
+}) {
+  if (!baseSku) return "";
+
+  if (hasDuplicateBaseSku) {
+    return heightCount === 1
+      ? `${baseSku}-${colorSlug}`
+      : `${baseSku}-${colorSlug}-${heightSlug}`;
+  }
+
+  return heightCount === 1 ? baseSku : `${baseSku}-${heightSlug}`;
 }
 
 export function generateAccessoryVariants(accessorySku?: string): GeneratedVariant[] {
