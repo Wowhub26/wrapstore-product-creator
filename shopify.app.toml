@@ -27,7 +27,7 @@ use_legacy_install_flow = false
 
 [auth]
 redirect_urls = [
-  "https://custom-sqm-pricing-wowstampa.onrender.com/auth/callback",
-  "https://custom-sqm-pricing-wowstampa.onrender.com/auth/shopify/callback",
-  "https://custom-sqm-pricing-wowstampa.onrender.com/api/auth/callback"
+  "https://wrapstore-product-creator.onrender.com/auth/callback",
+  "https://wrapstore-product-creator.onrender.com/auth/shopify/callback",
+  "https://wrapstore-product-creator.onrender.com/api/auth/callback"
 ]
