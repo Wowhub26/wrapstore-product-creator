@@ -130,7 +130,7 @@ export async function createGuidedProduct(
   const failures: string[] = [];
 
   try {
-    await logOperation({
+    await safeLogOperation({
       shop,
       draftId: payload.draftId,
       operation: "create_product:start",
@@ -148,10 +148,6 @@ export async function createGuidedProduct(
         };
       }),
     );
-
-    const pdfFileId = payload.pdf?.dataUrl
-      ? await createShopifyFile(admin, payload.pdf, `Info prodotto ${payload.title}`)
-      : null;
 
     const createdProduct = await createProduct(admin, payload, imageMedia);
     productId = createdProduct.id;
@@ -187,7 +183,13 @@ export async function createGuidedProduct(
     });
 
     await runPostCreateStep(failures, "PDF info prodotto", async () => {
-      if (pdfFileId) await attachPdfMetafield(admin, productId!, pdfFileId);
+      if (!payload.pdf?.dataUrl) return;
+      const pdfFileId = await createShopifyFile(
+        admin,
+        payload.pdf,
+        `Info prodotto ${payload.title}`,
+      );
+      await attachPdfMetafield(admin, productId!, pdfFileId);
     });
 
     await runPostCreateStep(failures, "Aggiunta collezione", async () => {
@@ -196,7 +198,7 @@ export async function createGuidedProduct(
 
     const partial = failures.length > 0;
 
-    await logOperation({
+    await safeLogOperation({
       shop,
       draftId: payload.draftId,
       productId,
@@ -220,7 +222,7 @@ export async function createGuidedProduct(
     };
   } catch (error) {
     const normalized = normalizeShopifyError(error);
-    await logOperation({
+    await safeLogOperation({
       shop,
       draftId: payload.draftId,
       productId,
@@ -240,6 +242,14 @@ export async function createGuidedProduct(
         : normalized.userMessage,
       failures: [normalized.userMessage],
     };
+  }
+}
+
+async function safeLogOperation(input: Parameters<typeof logOperation>[0]) {
+  try {
+    await logOperation(input);
+  } catch (error) {
+    console.error("OperationLog failed", error);
   }
 }
 

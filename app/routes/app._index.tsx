@@ -298,6 +298,12 @@ export default function NewProductWizard() {
         setResult(response.result);
         shopify.toast.show(response.result.message);
       }
+    } catch (error) {
+      setErrors([
+        error instanceof Error
+          ? error.message
+          : "Errore durante la creazione del prodotto.",
+      ]);
     } finally {
       setIsSaving(false);
     }
@@ -882,6 +888,14 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(
+      text.trim() || `Richiesta fallita (${response.status}). Riprova o controlla i log Render.`,
+    );
+  }
+
   return response.json();
 }
 
