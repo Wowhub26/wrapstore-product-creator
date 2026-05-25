@@ -2,7 +2,7 @@
 
 client_id = "b1421b1709367593447051eaaf25c6cb"
 name = "Wrapstore Product Creator"
-application_url = "https://custom-sqm-pricing-wowstampa.onrender.com"
+application_url = "https://wrapstore-product-creator.onrender.com"
 embedded = true
 
 [build]
