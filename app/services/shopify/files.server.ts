@@ -15,7 +15,6 @@ const STAGED_UPLOADS_CREATE = `#graphql
       userErrors {
         field
         message
-        code
       }
     }
   }
@@ -32,7 +31,6 @@ const FILE_CREATE = `#graphql
       userErrors {
         field
         message
-        code
       }
     }
   }

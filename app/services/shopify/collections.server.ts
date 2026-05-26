@@ -37,7 +37,6 @@ const COLLECTION_ADD_PRODUCTS = `#graphql
       userErrors {
         field
         message
-        code
       }
     }
   }

@@ -33,7 +33,6 @@ const METAFIELDS_SET = `#graphql
       userErrors {
         field
         message
-        code
       }
     }
   }

@@ -79,7 +79,6 @@ const METAOBJECT_CREATE = `#graphql
       userErrors {
         field
         message
-        code
       }
     }
   }

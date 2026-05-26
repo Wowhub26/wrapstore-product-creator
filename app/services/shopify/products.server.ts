@@ -51,7 +51,6 @@ const PRODUCT_CREATE = `#graphql
       userErrors {
         field
         message
-        code
       }
     }
   }
@@ -81,7 +80,6 @@ const PRODUCT_VARIANTS_BULK_CREATE = `#graphql
       userErrors {
         field
         message
-        code
       }
     }
   }
@@ -97,7 +95,6 @@ const PRODUCT_VARIANTS_BULK_UPDATE = `#graphql
       userErrors {
         field
         message
-        code
       }
     }
   }
