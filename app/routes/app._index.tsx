@@ -278,7 +278,7 @@ export default function NewProductWizard() {
       if (!payload.title && !payload.collectionId && !payload.images.length) return;
       setIsAutosaving(true);
       try {
-        const response = await postJson<ActionResponse>(indexActionUrl(), {
+        const response = await postJson<ActionResponse>(productCreatorApiUrl(), {
           intent: "saveDraft",
           draftId: payload.draftId,
           payload: stripBinaryData(payload),
@@ -1018,9 +1018,9 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
   return response.json();
 }
 
-function indexActionUrl() {
+function productCreatorApiUrl() {
   const url = new URL(window.location.href);
-  url.searchParams.set("index", "");
+  url.pathname = "/app/product-creator-action";
   return `${url.pathname}${url.search}`;
 }
 
@@ -1085,7 +1085,7 @@ async function postCreateProductWithDirectUploads(
 
   const targets = await uploadFilesBestEffort(uploadItems);
 
-  return postJson<ActionResponse>(indexActionUrl(), {
+  return postJson<ActionResponse>(productCreatorApiUrl(), {
     intent: "createProduct",
     draftId: payload.draftId,
     payload,
@@ -1107,7 +1107,7 @@ async function uploadFilesBestEffort(uploadItems: ClientUploadItem[]) {
   if (!uploadItems.length) return [];
 
   try {
-    const prepareResponse = await postJson<ActionResponse>(indexActionUrl(), {
+    const prepareResponse = await postJson<ActionResponse>(productCreatorApiUrl(), {
       intent: "prepareUploads",
       files: uploadItems.map((item) => ({
         key: item.key,
