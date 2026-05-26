@@ -67,6 +67,8 @@ const SPEC_FIELDS: ProductSpecInput[] = [
   { key: "metodo_applicazione", title: "Metodo di applicazione", value: "" },
 ];
 
+const INDEX_ACTION_URL = "/app?index";
+
 const EMPTY_PAYLOAD: ProductCreatorPayload = {
   collectionId: "",
   collectionTitle: "",
@@ -259,7 +261,7 @@ export default function NewProductWizard() {
       if (!payload.title && !payload.collectionId && !payload.images.length) return;
       setIsAutosaving(true);
       try {
-        const response = await postJson<ActionResponse>("/app", {
+        const response = await postJson<ActionResponse>(INDEX_ACTION_URL, {
           intent: "saveDraft",
           draftId: payload.draftId,
           payload: stripBinaryData(payload),
@@ -1021,7 +1023,7 @@ async function postCreateProductWithDirectUploads(
     });
   }
 
-  const prepareResponse = await postJson<ActionResponse>("/app", {
+  const prepareResponse = await postJson<ActionResponse>(INDEX_ACTION_URL, {
     intent: "prepareUploads",
     files: uploadItems.map((item) => ({
       key: item.key,
@@ -1058,7 +1060,7 @@ async function postCreateProductWithDirectUploads(
     }),
   );
 
-  return postJson<ActionResponse>("/app", {
+  return postJson<ActionResponse>(INDEX_ACTION_URL, {
     intent: "createProduct",
     draftId: payload.draftId,
     payload,
