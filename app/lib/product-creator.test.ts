@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   findDuplicateVariantSkus,
   generateFilmVariants,
+  groupImagesByVariantColor,
+  normalizeImageTitleFromFilename,
   normalizeColorNameFromFilename,
   productCreatorPayloadSchema,
   resolveProductSpecsMapping,
@@ -14,6 +16,29 @@ describe("product creator utilities", () => {
     expect(normalizeColorNameFromFilename("Rosso-Mattone.jpg")).toBe("Rosso Mattone");
     expect(normalizeColorNameFromFilename("blu_notte.webp")).toBe("blu notte");
     expect(normalizeColorNameFromFilename(" Verde   Salvia.PNG")).toBe("Verde Salvia");
+  });
+
+  it("normalizes image titles and variant color groups", () => {
+    expect(normalizeImageTitleFromFilename("Traffic-Yellow_1.jpg")).toBe("Traffic Yellow_1");
+    expect(groupImagesByVariantColor([
+      {
+        fileName: "yellow-1.jpg",
+        colorName: "Traffic Yellow_1",
+        variantColorName: "Traffic Yellow",
+        isColorCover: false,
+      },
+      {
+        fileName: "yellow-2.jpg",
+        colorName: "Traffic Yellow_2",
+        variantColorName: "Traffic Yellow",
+        isColorCover: true,
+      },
+    ])).toMatchObject([
+      {
+        name: "Traffic Yellow",
+        cover: { colorName: "Traffic Yellow_2" },
+      },
+    ]);
   });
 
   it("slugifies handles for Shopify/metaobject usage", () => {
@@ -51,11 +76,22 @@ describe("product creator utilities", () => {
     expect(variant.sku).toBe("RS");
   });
 
-  it("disambiguates repeated color SKUs with the color slug", () => {
+  it("groups multiple images into one color variant", () => {
     const variants = generateFilmVariants(
       [
-        { fileName: "yellow-1.jpg", colorName: "Traffic Yellow_1", colorSku: "98814" },
-        { fileName: "yellow-2.jpg", colorName: "Traffic Yellow_2", colorSku: "98814" },
+        {
+          fileName: "yellow-1.jpg",
+          colorName: "Traffic Yellow_1",
+          variantColorName: "Traffic Yellow",
+          colorSku: "98814",
+        },
+        {
+          fileName: "yellow-2.jpg",
+          colorName: "Traffic Yellow_2",
+          variantColorName: "Traffic Yellow",
+          colorSku: "98814",
+          isColorCover: true,
+        },
       ],
       [
         { id: "h1", label: "76 Cm" },
@@ -64,26 +100,32 @@ describe("product creator utilities", () => {
     );
 
     expect(variants.map((variant) => variant.sku)).toEqual([
-      "98814-traffic-yellow-1-76-cm",
-      "98814-traffic-yellow-1-51-cm",
-      "98814-traffic-yellow-2-76-cm",
-      "98814-traffic-yellow-2-51-cm",
+      "98814-76-cm",
+      "98814-51-cm",
+    ]);
+    expect(variants.map((variant) => variant.colorName)).toEqual([
+      "Traffic Yellow",
+      "Traffic Yellow",
+    ]);
+    expect(variants.map((variant) => variant.mediaAlt)).toEqual([
+      "Traffic Yellow_2",
+      "Traffic Yellow_2",
     ]);
     expect(findDuplicateVariantSkus(variants)).toEqual([]);
   });
 
-  it("disambiguates repeated color SKUs when there is only one height", () => {
+  it("disambiguates repeated color SKUs across distinct colors when there is only one height", () => {
     const variants = generateFilmVariants(
       [
-        { fileName: "yellow-1.jpg", colorName: "Traffic Yellow_1", colorSku: "98814" },
-        { fileName: "yellow-2.jpg", colorName: "Traffic Yellow_2", colorSku: "98814" },
+        { fileName: "yellow.jpg", colorName: "Traffic Yellow", colorSku: "98814" },
+        { fileName: "orange.jpg", colorName: "Traffic Orange", colorSku: "98814" },
       ],
       [{ id: "h1", label: "76 Cm" }],
     );
 
     expect(variants.map((variant) => variant.sku)).toEqual([
-      "98814-traffic-yellow-1",
-      "98814-traffic-yellow-2",
+      "98814-traffic-yellow",
+      "98814-traffic-orange",
     ]);
   });
 
@@ -114,7 +156,7 @@ describe("product creator utilities", () => {
 
     expect(result.success).toBe(false);
     expect(result.error?.issues.map((issue) => issue.message)).toContain(
-      "Nome colore duplicato: rosso.",
+      "Titolo immagine duplicato: rosso.",
     );
     expect(findDuplicateVariantSkus([{ sku: "A" }, { sku: "A" }])).toEqual(["A"]);
   });

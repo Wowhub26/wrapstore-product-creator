@@ -10,7 +10,9 @@ import { authenticate } from "../shopify.server";
 import {
   ACCEPTED_IMAGE_TYPES,
   generateFilmVariants,
-  normalizeColorNameFromFilename,
+  groupImagesByVariantColor,
+  normalizeImageTitleFromFilename,
+  variantColorNameFromImageTitle,
   productCreatorPayloadSchema,
   type ColorImageInput,
   type HeightInput,
@@ -168,22 +170,31 @@ export default function NewProductWizard() {
           mimeType: file.type,
           size: file.size,
           dataUrl: await readFileAsDataUrl(file),
-          colorName: normalizeColorNameFromFilename(file.name),
+          colorName: normalizeImageTitleFromFilename(file.name),
+          variantColorName: variantColorNameFromImageTitle(normalizeImageTitleFromFilename(file.name)),
           colorSku: "",
+          isColorCover: false,
           position: payload.images.length + index,
         };
       }),
     );
 
-    setPayload((current) => ({ ...current, images: [...current.images, ...images] }));
+    setPayload((current) => ({
+      ...current,
+      images: ensureColorCovers([...current.images, ...images]),
+    }));
     setErrors([]);
   };
 
   const updateImage = (id: string | undefined, patch: Partial<ColorImageInput>) => {
     setPayload((current) => ({
       ...current,
-      images: current.images.map((image) =>
-        image.id === id ? { ...image, ...patch } : image,
+      images: normalizeImageCoverSelection(
+        current.images.map((image) =>
+          image.id === id ? { ...image, ...patch } : image,
+        ),
+        id,
+        patch,
       ),
     }));
   };
@@ -192,7 +203,7 @@ export default function NewProductWizard() {
     if (id) imageFilesRef.current.delete(id);
     setPayload((current) => ({
       ...current,
-      images: current.images.filter((image) => image.id !== id),
+      images: ensureColorCovers(current.images.filter((image) => image.id !== id)),
     }));
   };
 
@@ -507,6 +518,7 @@ function FilmStep({
       <h2>Configurazione Pellicole</h2>
       <DropZone fileInputRef={fileInputRef} limits={limits} onAddImages={onAddImages} />
       <ImageRows images={payload.images} onRemove={onRemoveImage} onUpdate={onUpdateImage} />
+      <ColorGroupSummary images={payload.images} />
 
       <label>
         Altezza
@@ -635,11 +647,28 @@ function ImageRows({
             />
           </label>
           <label>
+            Colore variante
+            <input
+              onChange={(event) =>
+                onUpdate(image.id, { variantColorName: event.currentTarget.value })
+              }
+              value={image.variantColorName ?? variantColorNameFromImageTitle(image.colorName)}
+            />
+          </label>
+          <label>
             SKU colore
             <input
               onChange={(event) => onUpdate(image.id, { colorSku: event.currentTarget.value })}
               value={image.colorSku ?? ""}
             />
+          </label>
+          <label className="check image-cover">
+            <input
+              checked={Boolean(image.isColorCover)}
+              onChange={() => onUpdate(image.id, { isColorCover: true })}
+              type="radio"
+            />
+            Copertina colore
           </label>
           <button onClick={() => onRemove(image.id)} type="button">
             Rimuovi
@@ -648,6 +677,64 @@ function ImageRows({
       ))}
     </div>
   );
+}
+
+function ColorGroupSummary({ images }: { images: ColorImageInput[] }) {
+  const groups = groupImagesByVariantColor(images);
+  if (!groups.length) return null;
+
+  return (
+    <div className="color-groups">
+      <h3>Colori variante</h3>
+      {groups.map((group) => (
+        <div className="color-group" key={group.name}>
+          <strong>{group.name}</strong>
+          <span>{group.images.length} immagini</span>
+          <span>Copertina: {group.cover.colorName}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function normalizeImageCoverSelection(
+  images: ColorImageInput[],
+  changedId: string | undefined,
+  patch: Partial<ColorImageInput>,
+) {
+  if (!changedId) return ensureColorCovers(images);
+  const changed = images.find((image) => image.id === changedId);
+  if (!changed) return ensureColorCovers(images);
+
+  const changedGroup = imageVariantColorName(changed).toLowerCase();
+  const normalized = patch.isColorCover
+    ? images.map((image) =>
+        imageVariantColorName(image).toLowerCase() === changedGroup
+          ? { ...image, isColorCover: image.id === changedId }
+          : image,
+      )
+    : images;
+
+  return ensureColorCovers(normalized);
+}
+
+function ensureColorCovers(images: ColorImageInput[]) {
+  const coveredGroups = new Set(
+    images
+      .filter((image) => image.isColorCover)
+      .map((image) => imageVariantColorName(image).toLowerCase()),
+  );
+
+  return images.map((image) => {
+    const group = imageVariantColorName(image).toLowerCase();
+    if (coveredGroups.has(group)) return image;
+    coveredGroups.add(group);
+    return { ...image, isColorCover: true };
+  });
+}
+
+function imageVariantColorName(image: Pick<ColorImageInput, "colorName" | "variantColorName">) {
+  return image.variantColorName?.trim() || variantColorNameFromImageTitle(image.colorName);
 }
 
 function Review({
@@ -672,7 +759,7 @@ function Review({
         <dt>Brand</dt>
         <dd>{payload.brand || "-"}</dd>
         <dt>Colori</dt>
-        <dd>{payload.images.map((image) => image.colorName).join(", ") || "-"}</dd>
+        <dd>{groupImagesByVariantColor(payload.images).map((group) => group.name).join(", ") || "-"}</dd>
         <dt>Altezze</dt>
         <dd>{payload.heights.map((height) => height.label).join(", ") || "-"}</dd>
         <dt>Varianti</dt>
@@ -939,8 +1026,12 @@ const styles = `
   button.primary { background: #008060; border-color: #008060; color: #fff; }
   button:disabled { opacity: 0.45; cursor: not-allowed; }
   .image-list { display: grid; gap: 12px; }
-  .image-row { display: grid; grid-template-columns: 84px 1fr 180px auto; gap: 12px; align-items: end; padding: 12px; border: 1px solid #e1e5ea; border-radius: 8px; }
+  .image-row { display: grid; grid-template-columns: 84px minmax(150px, 1fr) minmax(150px, 1fr) 160px 140px auto; gap: 12px; align-items: end; padding: 12px; border: 1px solid #e1e5ea; border-radius: 8px; }
   .image-row img, .image-row > div:first-child { width: 84px; height: 84px; object-fit: cover; border-radius: 6px; background: #eef1f4; }
+  .image-cover { align-self: center; padding-bottom: 9px; }
+  .color-groups { border: 1px solid #e1e5ea; border-radius: 8px; padding: 12px; display: grid; gap: 8px; }
+  .color-groups h3 { margin: 0; font-size: 15px; }
+  .color-group { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; color: #3f4750; }
   .upload-row { display: flex; gap: 12px; align-items: center; }
   .review dl { display: grid; grid-template-columns: 160px 1fr; gap: 10px 16px; margin: 0 0 18px; }
   .review dt { font-weight: 750; color: #3f4750; }

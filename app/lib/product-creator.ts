@@ -13,7 +13,9 @@ export type ColorImageInput = {
   size: number;
   dataUrl?: string;
   colorName: string;
+  variantColorName?: string;
   colorSku?: string;
+  isColorCover?: boolean;
   position?: number;
 };
 
@@ -57,6 +59,7 @@ export type GeneratedVariant = {
   sku?: string;
   optionValues: { optionName: string; name: string }[];
   mediaFileName?: string;
+  mediaAlt?: string;
 };
 
 export type ProductSpecsMapping = {
@@ -75,7 +78,9 @@ export const colorImageSchema = z.object({
   size: z.number().int().positive(),
   dataUrl: z.string().optional(),
   colorName: nonEmptyString,
+  variantColorName: z.string().trim().optional(),
   colorSku: z.string().trim().optional(),
+  isColorCover: z.boolean().optional(),
   position: z.number().int().nonnegative().optional(),
 });
 
@@ -117,14 +122,14 @@ export const productCreatorPayloadSchema = z
     accessorySku: z.string().trim().optional(),
   })
   .superRefine((payload, context) => {
-    const duplicateColors = findDuplicateValues(
+    const duplicateImageTitles = findDuplicateValues(
       payload.images.map((image) => image.colorName),
     );
-    duplicateColors.forEach((color) => {
+    duplicateImageTitles.forEach((color) => {
       context.addIssue({
         code: "custom",
         path: ["images"],
-        message: `Nome colore duplicato: ${color}.`,
+        message: `Titolo immagine duplicato: ${color}.`,
       });
     });
 
@@ -162,6 +167,14 @@ export function normalizeColorNameFromFilename(fileName: string) {
   return nameOnly.replace(/[-_]+/g, " ").replace(/\s+/g, " ").trim();
 }
 
+export function normalizeImageTitleFromFilename(fileName: string) {
+  return normalizeColorNameFromFilename(fileName).replace(/\s+(\d+)$/, "_$1");
+}
+
+export function variantColorNameFromImageTitle(imageTitle: string) {
+  return imageTitle.replace(/[_\s-]+\d+$/, "").replace(/\s+/g, " ").trim();
+}
+
 export function slugifyHandle(value: string) {
   return value
     .normalize("NFD")
@@ -173,18 +186,19 @@ export function slugifyHandle(value: string) {
 }
 
 export function generateFilmVariants(
-  images: Pick<ColorImageInput, "colorName" | "colorSku" | "fileName">[],
+  images: Pick<ColorImageInput, "colorName" | "variantColorName" | "colorSku" | "fileName" | "isColorCover">[],
   heights: Pick<HeightInput, "id" | "label" | "value" | "handle">[],
 ): GeneratedVariant[] {
+  const colorGroups = groupImagesByVariantColor(images);
   const duplicateBaseSkus = new Set(findDuplicateValues(
-    images.map((image) => image.colorSku ?? "").filter(Boolean),
+    colorGroups.map((group) => group.cover.colorSku ?? "").filter(Boolean),
   ));
 
-  return images.flatMap((image) =>
+  return colorGroups.flatMap((group) =>
     heights.map((height) => {
-      const baseSku = image.colorSku?.trim();
+      const baseSku = group.cover.colorSku?.trim();
       const heightSlug = slugifyHandle(height.value || height.handle || height.label);
-      const colorSlug = slugifyHandle(image.colorName);
+      const colorSlug = slugifyHandle(group.name);
       const sku = buildVariantSku({
         baseSku,
         colorSlug,
@@ -194,17 +208,44 @@ export function generateFilmVariants(
       });
 
       return {
-        colorName: image.colorName,
+        colorName: group.name,
         heightLabel: height.label,
         sku,
-        mediaFileName: image.fileName,
+        mediaFileName: group.cover.fileName,
+        mediaAlt: group.cover.colorName,
         optionValues: [
-          { optionName: "Colore", name: image.colorName },
+          { optionName: "Colore", name: group.name },
           { optionName: "Altezza", name: height.label },
         ],
       };
     }),
   );
+}
+
+export function groupImagesByVariantColor(
+  images: Pick<ColorImageInput, "colorName" | "variantColorName" | "colorSku" | "fileName" | "isColorCover">[],
+) {
+  const groups = new Map<
+    string,
+    {
+      name: string;
+      images: typeof images;
+    }
+  >();
+
+  images.forEach((image) => {
+    const name = (image.variantColorName?.trim() || variantColorNameFromImageTitle(image.colorName)).trim();
+    if (!name) return;
+    const key = name.toLowerCase();
+    const group = groups.get(key) ?? { name, images: [] };
+    group.images = [...group.images, image];
+    groups.set(key, group);
+  });
+
+  return [...groups.values()].map((group) => ({
+    ...group,
+    cover: group.images.find((image) => image.isColorCover) ?? group.images[0],
+  }));
 }
 
 function buildVariantSku({

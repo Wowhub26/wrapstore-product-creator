@@ -1,5 +1,6 @@
 import {
   generateFilmVariants,
+  groupImagesByVariantColor,
   productCreatorPayloadSchema,
   productSpecsSku,
   summarizeZodError,
@@ -173,8 +174,8 @@ export async function createGuidedProduct(
           (variant) => ({
             optionValues: variant.optionValues,
             ...(variant.sku ? { inventoryItem: { sku: variant.sku } } : {}),
-            ...(variant.colorName
-              ? { mediaId: mediaByAlt.get(variant.colorName.toLowerCase()) }
+            ...(variant.mediaAlt
+              ? { mediaId: mediaByAlt.get(variant.mediaAlt.toLowerCase()) }
               : {}),
           }),
         );
@@ -287,7 +288,7 @@ async function createProduct(
       ? [
           {
             name: "Colore",
-            values: payload.images.map((image) => ({ name: image.colorName })),
+            values: groupImagesByVariantColor(payload.images).map((group) => ({ name: group.name })),
           },
           {
             name: "Altezza",
