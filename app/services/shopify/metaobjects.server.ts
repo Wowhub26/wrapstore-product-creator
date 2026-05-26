@@ -3,7 +3,11 @@ import {
   type ProductSpecInput,
 } from "../../lib/product-creator";
 import { assertNoUserErrors, shopifyGraphql, type ShopifyAdminClient } from "./common.server";
-import { getProductMetafieldDefinition, setProductMetafields } from "./metafields.server";
+import {
+  ensureProductMetaobjectListDefinition,
+  getProductMetafieldDefinition,
+  setProductMetafields,
+} from "./metafields.server";
 
 const METAOBJECTS_BY_TYPE = `#graphql
   query GuidedProductMetaobjectsByType($type: String!, $cursor: String) {
@@ -244,6 +248,7 @@ export async function createProductSpecEntries(
 
   const definition = await shopifyGraphql<{
     metaobjectDefinitionByType: {
+      id: string;
       type: string;
       fieldDefinitions: Array<{ key: string }>;
     } | null;
@@ -252,6 +257,16 @@ export async function createProductSpecEntries(
   if (!definition.metaobjectDefinitionByType) {
     throw new Error(`Metaobject definition "${typeFromDefinition}" non trovata.`);
   }
+
+  const ensuredMetafieldDefinition =
+    metafieldDefinition ||
+    (await ensureProductMetaobjectListDefinition(admin, {
+      namespace: "custom",
+      key: "product_specs",
+      name: "Specifiche prodotto",
+      description: "Specifiche prodotto collegate come riferimenti a metaobject.",
+      metaobjectDefinitionId: definition.metaobjectDefinitionByType.id,
+    }));
 
   const fields = buildProductSpecsFields(
     definition.metaobjectDefinitionByType.fieldDefinitions,
@@ -285,8 +300,8 @@ export async function createProductSpecEntries(
       ownerId: productId,
       namespace: "custom",
       key: "product_specs",
-      type: productSpecsMetafieldType(metafieldDefinition?.type.name),
-      value: productSpecsMetafieldType(metafieldDefinition?.type.name).startsWith("list.")
+      type: productSpecsMetafieldType(ensuredMetafieldDefinition.type.name),
+      value: productSpecsMetafieldType(ensuredMetafieldDefinition.type.name).startsWith("list.")
         ? JSON.stringify([createdId])
         : createdId,
     },
