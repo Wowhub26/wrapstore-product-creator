@@ -242,12 +242,6 @@ export async function createProductSpecEntries(
     )?.value ||
     "specifiche_prodotto";
 
-  if (!metafieldDefinition?.type.name.includes("metaobject_reference")) {
-    throw new Error(
-      "custom.product_specs deve essere una lista di riferimenti metaobject compatibile.",
-    );
-  }
-
   const definition = await shopifyGraphql<{
     metaobjectDefinitionByType: {
       type: string;
@@ -291,14 +285,26 @@ export async function createProductSpecEntries(
       ownerId: productId,
       namespace: "custom",
       key: "product_specs",
-      type: metafieldDefinition.type.name,
-      value: metafieldDefinition.type.name.startsWith("list.")
+      type: productSpecsMetafieldType(metafieldDefinition?.type.name),
+      value: productSpecsMetafieldType(metafieldDefinition?.type.name).startsWith("list.")
         ? JSON.stringify([createdId])
         : createdId,
     },
   ]);
 
   return [createdId];
+}
+
+function productSpecsMetafieldType(definitionType?: string) {
+  if (
+    definitionType &&
+    (definitionType.includes("metaobject_reference") ||
+      definitionType.includes("mixed_reference"))
+  ) {
+    return definitionType;
+  }
+
+  return "list.metaobject_reference";
 }
 
 function buildProductSpecsFields(
