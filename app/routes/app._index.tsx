@@ -22,6 +22,7 @@ import {
 import { getCollections, type ShopifyCollection } from "../services/shopify/collections.server";
 import { getHeightOptions } from "../services/shopify/metaobjects.server";
 import { createGuidedProduct, type CreateProductResult } from "../services/shopify/products.server";
+import { createStagedUploadTargets } from "../services/shopify/files.server";
 
 type LoaderData = {
   collections: ShopifyCollection[];
@@ -40,6 +41,22 @@ type ActionResponse = {
   errors?: string[];
   draftId?: string;
   result?: CreateProductResult;
+  uploadTargets?: PreparedUploadTarget[];
+};
+
+type PreparedUploadTarget = {
+  key: string;
+  url: string;
+  resourceUrl: string;
+  parameters: Array<{ name: string; value: string }>;
+};
+
+type ClientUploadItem = {
+  key: string;
+  fileName: string;
+  mimeType: string;
+  resource: "IMAGE" | "FILE";
+  file: File;
 };
 
 const SPEC_FIELDS: ProductSpecInput[] = [
@@ -145,6 +162,23 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const intent = String(body.intent ?? "");
   const payload = body.payload as ProductCreatorPayload;
 
+  if (intent === "prepareUploads") {
+    const files = (body.files ?? []) as Array<{
+      key: string;
+      fileName: string;
+      mimeType: string;
+      resource: "IMAGE" | "FILE";
+    }>;
+    const targets = await createStagedUploadTargets(admin, files);
+    return {
+      ok: true,
+      uploadTargets: targets.map((target, index) => ({
+        key: files[index].key,
+        ...target,
+      })),
+    } satisfies ActionResponse;
+  }
+
   if (intent === "saveDraft") {
     const draftId = await saveDraft(session.shop, payload, body.draftId);
     return { ok: true, draftId } satisfies ActionResponse;
@@ -156,7 +190,26 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return { ok: false, errors: limitErrors } satisfies ActionResponse;
     }
 
-    const result = await createGuidedProduct(admin, session.shop, payload);
+    const uploadedResources = body.uploadedResources as
+      | {
+          images?: Array<{ id: string; resourceUrl: string }>;
+          pdf?: { resourceUrl: string };
+        }
+      | undefined;
+    const imageResources = new Map(
+      uploadedResources?.images?.map((image) => [image.id, image.resourceUrl]) ?? [],
+    );
+
+    const result = await createGuidedProduct(
+      admin,
+      session.shop,
+      payload,
+      {},
+      {
+        images: imageResources,
+        pdf: uploadedResources?.pdf?.resourceUrl,
+      },
+    );
     if (payload.draftId || body.draftId) {
       await saveDraft(session.shop, { ...payload, draftId: payload.draftId || body.draftId }, body.draftId);
     }
@@ -334,7 +387,7 @@ export default function NewProductWizard() {
     setIsSaving(true);
     setResult(null);
     try {
-      const response = await postCreateProductForm(
+      const response = await postCreateProductWithDirectUploads(
         stripBinaryData(payload),
         imageFilesRef.current,
         pdfFileRef.current,
@@ -945,37 +998,82 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
   return response.json();
 }
 
-async function postCreateProductForm(
+async function postCreateProductWithDirectUploads(
   payload: ProductCreatorPayload,
   imageFiles: Map<string, File>,
   pdfFile: File | null,
 ): Promise<ActionResponse> {
-  const formData = new FormData();
-  formData.append("intent", "createProduct");
-  if (payload.draftId) formData.append("draftId", payload.draftId);
-  formData.append("payload", JSON.stringify(payload));
-
-  payload.images.forEach((image) => {
-    if (!image.id) return;
+  const uploadItems: ClientUploadItem[] = payload.images.flatMap((image) => {
+    if (!image.id) return [];
     const file = imageFiles.get(image.id);
-    if (file) formData.append(`image:${image.id}`, file);
+    return file
+      ? [{ key: `image:${image.id}`, fileName: image.fileName, mimeType: image.mimeType, resource: "IMAGE" as const, file }]
+      : [];
   });
 
-  if (pdfFile) formData.append("pdf", pdfFile);
-
-  const response = await fetch("/app", {
-    method: "POST",
-    body: formData,
-  });
-
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(
-      text.trim() || `Richiesta fallita (${response.status}). Riprova o controlla i log Render.`,
-    );
+  if (pdfFile && payload.pdf) {
+    uploadItems.push({
+      key: "pdf",
+      fileName: payload.pdf.fileName,
+      mimeType: payload.pdf.mimeType,
+      resource: "FILE" as const,
+      file: pdfFile,
+    });
   }
 
-  return response.json();
+  const prepareResponse = await postJson<ActionResponse>("/app", {
+    intent: "prepareUploads",
+    files: uploadItems.map((item) => ({
+      key: item.key,
+      fileName: item.fileName,
+      mimeType: item.mimeType,
+      resource: item.resource,
+    })),
+  });
+
+  const targets = prepareResponse.uploadTargets ?? [];
+  if (targets.length !== uploadItems.length) {
+    throw new Error("Shopify non ha preparato tutti gli upload richiesti.");
+  }
+
+  await Promise.all(
+    uploadItems.map(async (item) => {
+      const target = targets.find((uploadTarget) => uploadTarget.key === item.key);
+      if (!target) throw new Error(`Upload non preparato per ${item.fileName}.`);
+
+      const formData = new FormData();
+      target.parameters.forEach((parameter) => {
+        formData.append(parameter.name, parameter.value);
+      });
+      formData.append("file", item.file);
+
+      const uploadResponse = await fetch(target.url, {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!uploadResponse.ok) {
+        throw new Error(`Upload ${item.fileName} fallito (${uploadResponse.status}).`);
+      }
+    }),
+  );
+
+  return postJson<ActionResponse>("/app", {
+    intent: "createProduct",
+    draftId: payload.draftId,
+    payload,
+    uploadedResources: {
+      images: targets
+        .filter((target) => target.key.startsWith("image:"))
+        .map((target) => ({
+          id: target.key.replace("image:", ""),
+          resourceUrl: target.resourceUrl,
+        })),
+      pdf: targets.find((target) => target.key === "pdf")
+        ? { resourceUrl: targets.find((target) => target.key === "pdf")!.resourceUrl }
+        : undefined,
+    },
+  });
 }
 
 function stripBinaryData(payload: ProductCreatorPayload): ProductCreatorPayload {

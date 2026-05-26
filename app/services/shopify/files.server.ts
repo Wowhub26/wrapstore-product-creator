@@ -62,6 +62,40 @@ export type StagedUploadResult = {
   uploadUrl: string;
 };
 
+export type StagedUploadTarget = {
+  url: string;
+  resourceUrl: string;
+  parameters: Array<{ name: string; value: string }>;
+};
+
+export async function createStagedUploadTargets(
+  admin: ShopifyAdminClient,
+  files: Array<{ fileName: string; mimeType: string; resource: "IMAGE" | "FILE" }>,
+): Promise<StagedUploadTarget[]> {
+  if (!files.length) return [];
+
+  const data = await shopifyGraphql<{
+    stagedUploadsCreate: {
+      stagedTargets: StagedUploadTarget[];
+      userErrors: Array<{ message: string }>;
+    };
+  }>(admin, STAGED_UPLOADS_CREATE, {
+    input: files.map((file) => ({
+      filename: file.fileName,
+      mimeType: file.mimeType,
+      resource: file.resource,
+      httpMethod: "POST",
+    })),
+  });
+
+  assertNoUserErrors(data.stagedUploadsCreate.userErrors, "Preparazione upload file");
+  if (data.stagedUploadsCreate.stagedTargets.length !== files.length) {
+    throw new Error("Shopify non ha restituito tutti gli URL di upload.");
+  }
+
+  return data.stagedUploadsCreate.stagedTargets;
+}
+
 export async function stagedUploadFile(
   admin: ShopifyAdminClient,
   file: { fileName: string; mimeType: string },
@@ -171,30 +205,37 @@ async function createStagedUploadTarget(
   file: { fileName: string; mimeType: string },
   resource: "IMAGE" | "FILE",
 ) {
+  const [target] = await createStagedUploadTargets(admin, [{ ...file, resource }]);
+  if (!target) throw new Error("Shopify non ha restituito un URL di upload.");
+  return target;
+}
+
+export async function createShopifyFileFromResourceUrl(
+  admin: ShopifyAdminClient,
+  resourceUrl: string,
+  alt: string,
+) {
   const data = await shopifyGraphql<{
-    stagedUploadsCreate: {
-      stagedTargets: Array<{
-        url: string;
-        resourceUrl: string;
-        parameters: Array<{ name: string; value: string }>;
-      }>;
+    fileCreate: {
+      files: Array<{ id: string; fileStatus: string }>;
       userErrors: Array<{ message: string }>;
     };
-  }>(admin, STAGED_UPLOADS_CREATE, {
-    input: [
+  }>(admin, FILE_CREATE, {
+    files: [
       {
-        filename: file.fileName,
-        mimeType: file.mimeType,
-        resource,
-        httpMethod: "POST",
+        originalSource: resourceUrl,
+        contentType: "FILE",
+        alt,
       },
     ],
   });
 
-  assertNoUserErrors(data.stagedUploadsCreate.userErrors, "Preparazione upload file");
-  const target = data.stagedUploadsCreate.stagedTargets[0];
-  if (!target) throw new Error("Shopify non ha restituito un URL di upload.");
-  return target;
+  assertNoUserErrors(data.fileCreate.userErrors, "Creazione file Shopify");
+  const createdFile = data.fileCreate.files[0];
+  if (!createdFile) throw new Error("Shopify non ha creato il file.");
+
+  await waitForFileReady(admin, createdFile.id);
+  return createdFile.id;
 }
 
 export async function waitForFileReady(
