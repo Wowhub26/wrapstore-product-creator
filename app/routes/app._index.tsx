@@ -131,7 +131,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       const draftId = String(formData.get("draftId") ?? "") || undefined;
 
       if (intent !== "createProduct") {
-        return { ok: false, errors: ["Azione multipart non riconosciuta."] } satisfies ActionResponse;
+        return actionJson({ ok: false, errors: ["Azione multipart non riconosciuta."] });
       }
 
       const imageFiles = new Map<string, File>();
@@ -145,7 +145,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
       const limitErrors = validateUploadLimits(payload);
       if (limitErrors.length) {
-        return { ok: false, errors: limitErrors } satisfies ActionResponse;
+        return actionJson({ ok: false, errors: limitErrors });
       }
 
       const result = await createGuidedProduct(admin, session.shop, payload, {
@@ -157,7 +157,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         await saveDraft(session.shop, { ...payload, draftId: payload.draftId || draftId }, draftId);
       }
 
-      return { ok: result.ok, result, errors: result.ok ? undefined : result.failures } satisfies ActionResponse;
+      return actionJson({ ok: result.ok, result, errors: result.ok ? undefined : result.failures });
     }
 
     const body = await request.json();
@@ -172,28 +172,28 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         resource: "IMAGE" | "FILE";
       }>;
       const targets = await createStagedUploadTargets(admin, files);
-      return {
+      return actionJson({
         ok: true,
         uploadTargets: targets.map((target, index) => ({
           key: files[index].key,
           ...target,
         })),
-      } satisfies ActionResponse;
+      });
     }
 
     if (!payload) {
-      return { ok: false, errors: ["Payload mancante."] } satisfies ActionResponse;
+      return actionJson({ ok: false, errors: ["Payload mancante."] });
     }
 
     if (intent === "saveDraft") {
       const draftId = await saveDraft(session.shop, payload, body.draftId);
-      return { ok: true, draftId } satisfies ActionResponse;
+      return actionJson({ ok: true, draftId });
     }
 
     if (intent === "createProduct") {
       const limitErrors = validateUploadLimits(payload);
       if (limitErrors.length) {
-        return { ok: false, errors: limitErrors } satisfies ActionResponse;
+        return actionJson({ ok: false, errors: limitErrors });
       }
 
       const uploadedResources = body.uploadedResources as
@@ -219,20 +219,24 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       if (payload.draftId || body.draftId) {
         await saveDraft(session.shop, { ...payload, draftId: payload.draftId || body.draftId }, body.draftId);
       }
-      return { ok: result.ok, result, errors: result.ok ? undefined : result.failures } satisfies ActionResponse;
+      return actionJson({ ok: result.ok, result, errors: result.ok ? undefined : result.failures });
     }
 
-    return { ok: false, errors: ["Azione non riconosciuta."] } satisfies ActionResponse;
+    return actionJson({ ok: false, errors: ["Azione non riconosciuta."] });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Errore imprevisto durante l'operazione.";
     await safeLogActionError(session.shop, message, error);
     console.error("Product creator action failed", error);
-    return {
+    return actionJson({
       ok: false,
       errors: [message],
-    } satisfies ActionResponse;
+    });
   }
 };
+
+function actionJson(body: ActionResponse) {
+  return Response.json(body);
+}
 
 export default function NewProductWizard() {
   const { collections, heights, heightError, draft, draftId, limits } =
