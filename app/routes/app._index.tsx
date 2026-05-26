@@ -23,6 +23,7 @@ import { getCollections, type ShopifyCollection } from "../services/shopify/coll
 import { getHeightOptions } from "../services/shopify/metaobjects.server";
 import { createGuidedProduct, type CreateProductResult } from "../services/shopify/products.server";
 import { createStagedUploadTargets } from "../services/shopify/files.server";
+import { logOperation } from "../services/operation-log.server";
 
 type LoaderData = {
   collections: ShopifyCollection[];
@@ -122,103 +123,117 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
-  const contentType = request.headers.get("content-type") ?? "";
+  try {
+    const contentType = request.headers.get("content-type") ?? "";
 
-  if (contentType.includes("multipart/form-data")) {
-    const formData = await request.formData();
-    const intent = String(formData.get("intent") ?? "");
-    const payload = JSON.parse(String(formData.get("payload") ?? "{}")) as ProductCreatorPayload;
-    const draftId = String(formData.get("draftId") ?? "") || undefined;
+    if (contentType.includes("multipart/form-data")) {
+      const formData = await request.formData();
+      const intent = String(formData.get("intent") ?? "");
+      const payload = JSON.parse(String(formData.get("payload") ?? "{}")) as ProductCreatorPayload;
+      const draftId = String(formData.get("draftId") ?? "") || undefined;
 
-    if (intent !== "createProduct") {
-      return { ok: false, errors: ["Azione multipart non riconosciuta."] } satisfies ActionResponse;
-    }
-
-    const imageFiles = new Map<string, File>();
-    formData.forEach((value, key) => {
-      if (key.startsWith("image:") && value instanceof File) {
-        imageFiles.set(key.replace("image:", ""), value);
+      if (intent !== "createProduct") {
+        return { ok: false, errors: ["Azione multipart non riconosciuta."] } satisfies ActionResponse;
       }
-    });
-    const pdfValue = formData.get("pdf");
-    const pdf = pdfValue instanceof File && pdfValue.size > 0 ? pdfValue : undefined;
 
-    const limitErrors = validateUploadLimits(payload);
-    if (limitErrors.length) {
-      return { ok: false, errors: limitErrors } satisfies ActionResponse;
+      const imageFiles = new Map<string, File>();
+      formData.forEach((value, key) => {
+        if (key.startsWith("image:") && value instanceof File) {
+          imageFiles.set(key.replace("image:", ""), value);
+        }
+      });
+      const pdfValue = formData.get("pdf");
+      const pdf = pdfValue instanceof File && pdfValue.size > 0 ? pdfValue : undefined;
+
+      const limitErrors = validateUploadLimits(payload);
+      if (limitErrors.length) {
+        return { ok: false, errors: limitErrors } satisfies ActionResponse;
+      }
+
+      const result = await createGuidedProduct(admin, session.shop, payload, {
+        images: imageFiles,
+        pdf,
+      });
+
+      if (payload.draftId || draftId) {
+        await saveDraft(session.shop, { ...payload, draftId: payload.draftId || draftId }, draftId);
+      }
+
+      return { ok: result.ok, result, errors: result.ok ? undefined : result.failures } satisfies ActionResponse;
     }
 
-    const result = await createGuidedProduct(admin, session.shop, payload, {
-      images: imageFiles,
-      pdf,
-    });
+    const body = await request.json();
+    const intent = String(body.intent ?? "");
+    const payload = body.payload as ProductCreatorPayload | undefined;
 
-    if (payload.draftId || draftId) {
-      await saveDraft(session.shop, { ...payload, draftId: payload.draftId || draftId }, draftId);
+    if (intent === "prepareUploads") {
+      const files = (body.files ?? []) as Array<{
+        key: string;
+        fileName: string;
+        mimeType: string;
+        resource: "IMAGE" | "FILE";
+      }>;
+      const targets = await createStagedUploadTargets(admin, files);
+      return {
+        ok: true,
+        uploadTargets: targets.map((target, index) => ({
+          key: files[index].key,
+          ...target,
+        })),
+      } satisfies ActionResponse;
     }
 
-    return { ok: result.ok, result, errors: result.ok ? undefined : result.failures } satisfies ActionResponse;
-  }
+    if (!payload) {
+      return { ok: false, errors: ["Payload mancante."] } satisfies ActionResponse;
+    }
 
-  const body = await request.json();
-  const intent = String(body.intent ?? "");
-  const payload = body.payload as ProductCreatorPayload;
+    if (intent === "saveDraft") {
+      const draftId = await saveDraft(session.shop, payload, body.draftId);
+      return { ok: true, draftId } satisfies ActionResponse;
+    }
 
-  if (intent === "prepareUploads") {
-    const files = (body.files ?? []) as Array<{
-      key: string;
-      fileName: string;
-      mimeType: string;
-      resource: "IMAGE" | "FILE";
-    }>;
-    const targets = await createStagedUploadTargets(admin, files);
+    if (intent === "createProduct") {
+      const limitErrors = validateUploadLimits(payload);
+      if (limitErrors.length) {
+        return { ok: false, errors: limitErrors } satisfies ActionResponse;
+      }
+
+      const uploadedResources = body.uploadedResources as
+        | {
+            images?: Array<{ id: string; resourceUrl: string }>;
+            pdf?: { resourceUrl: string };
+          }
+        | undefined;
+      const imageResources = new Map(
+        uploadedResources?.images?.map((image) => [image.id, image.resourceUrl]) ?? [],
+      );
+
+      const result = await createGuidedProduct(
+        admin,
+        session.shop,
+        payload,
+        {},
+        {
+          images: imageResources,
+          pdf: uploadedResources?.pdf?.resourceUrl,
+        },
+      );
+      if (payload.draftId || body.draftId) {
+        await saveDraft(session.shop, { ...payload, draftId: payload.draftId || body.draftId }, body.draftId);
+      }
+      return { ok: result.ok, result, errors: result.ok ? undefined : result.failures } satisfies ActionResponse;
+    }
+
+    return { ok: false, errors: ["Azione non riconosciuta."] } satisfies ActionResponse;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Errore imprevisto durante l'operazione.";
+    await safeLogActionError(session.shop, message, error);
+    console.error("Product creator action failed", error);
     return {
-      ok: true,
-      uploadTargets: targets.map((target, index) => ({
-        key: files[index].key,
-        ...target,
-      })),
+      ok: false,
+      errors: [message],
     } satisfies ActionResponse;
   }
-
-  if (intent === "saveDraft") {
-    const draftId = await saveDraft(session.shop, payload, body.draftId);
-    return { ok: true, draftId } satisfies ActionResponse;
-  }
-
-  if (intent === "createProduct") {
-    const limitErrors = validateUploadLimits(payload);
-    if (limitErrors.length) {
-      return { ok: false, errors: limitErrors } satisfies ActionResponse;
-    }
-
-    const uploadedResources = body.uploadedResources as
-      | {
-          images?: Array<{ id: string; resourceUrl: string }>;
-          pdf?: { resourceUrl: string };
-        }
-      | undefined;
-    const imageResources = new Map(
-      uploadedResources?.images?.map((image) => [image.id, image.resourceUrl]) ?? [],
-    );
-
-    const result = await createGuidedProduct(
-      admin,
-      session.shop,
-      payload,
-      {},
-      {
-        images: imageResources,
-        pdf: uploadedResources?.pdf?.resourceUrl,
-      },
-    );
-    if (payload.draftId || body.draftId) {
-      await saveDraft(session.shop, { ...payload, draftId: payload.draftId || body.draftId }, body.draftId);
-    }
-    return { ok: result.ok, result, errors: result.ok ? undefined : result.failures } satisfies ActionResponse;
-  }
-
-  return { ok: false, errors: ["Azione non riconosciuta."] } satisfies ActionResponse;
 };
 
 export default function NewProductWizard() {
@@ -998,6 +1013,32 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
   }
 
   return response.json();
+}
+
+async function safeLogActionError(shop: string, message: string, error: unknown) {
+  try {
+    await logOperation({
+      shop,
+      operation: "product_creator:action_error",
+      status: "ERROR",
+      userMessage: message,
+      technicalDetail: serializeError(error),
+    });
+  } catch (logError) {
+    console.error("OperationLog failed", logError);
+  }
+}
+
+function serializeError(error: unknown) {
+  if (error instanceof Error) {
+    return {
+      name: error.name,
+      message: error.message,
+      stack: error.stack,
+    };
+  }
+
+  return { message: String(error) };
 }
 
 async function postCreateProductWithDirectUploads(
