@@ -156,23 +156,12 @@ export async function createGuidedProduct(
       userMessage: "Creazione prodotto avviata.",
     });
 
-    const imageMedia = await Promise.all(
-      payload.images.map(async (image) => {
-        const uploadedResourceUrl = image.id
-          ? uploadedResources.images?.get(image.id)
-          : undefined;
-        const upload = image.id ? uploadFiles.images?.get(image.id) : undefined;
-        const resourceUrl =
-          uploadedResourceUrl ??
-          (upload
-            ? (await stagedUploadFile(admin, image, upload, "IMAGE")).resourceUrl
-            : (await stagedUploadFromDataUrl(admin, image, "IMAGE")).resourceUrl);
-        return {
-          originalSource: resourceUrl,
-          mediaContentType: "IMAGE" as const,
-          alt: image.colorName,
-        };
-      }),
+    const imageMedia = await buildImageMedia(
+      admin,
+      payload,
+      uploadFiles,
+      uploadedResources,
+      failures,
     );
 
     const createdProduct = await createProduct(admin, payload, imageMedia);
@@ -327,7 +316,7 @@ async function createProduct(
       title: payload.title,
       vendor: payload.brand || undefined,
       productType: payload.category,
-      status: payload.publishNow ? "ACTIVE" : "DRAFT",
+      status: "DRAFT",
       ...(productOptions ? { productOptions } : {}),
     },
     media,
@@ -344,6 +333,49 @@ async function createProduct(
     media: data.productCreate.product.media.nodes,
     defaultVariantId: data.productCreate.product.variants.nodes[0]?.id,
   };
+}
+
+async function buildImageMedia(
+  admin: ShopifyAdminClient,
+  payload: ProductCreatorPayload,
+  uploadFiles: ProductUploadFiles,
+  uploadedResources: ProductUploadedResources,
+  failures: string[],
+) {
+  const media: Array<{ originalSource: string; mediaContentType: "IMAGE"; alt: string }> = [];
+
+  for (const image of payload.images) {
+    try {
+      const uploadedResourceUrl = image.id
+        ? uploadedResources.images?.get(image.id)
+        : undefined;
+      const upload = image.id ? uploadFiles.images?.get(image.id) : undefined;
+      const resourceUrl =
+        uploadedResourceUrl ??
+        (upload
+          ? (await stagedUploadFile(admin, image, upload, "IMAGE")).resourceUrl
+          : image.dataUrl
+            ? (await stagedUploadFromDataUrl(admin, image, "IMAGE")).resourceUrl
+            : undefined);
+
+      if (!resourceUrl) {
+        failures.push(`Immagine ${image.fileName}: file non disponibile, prodotto creato senza questa immagine.`);
+        continue;
+      }
+
+      media.push({
+        originalSource: resourceUrl,
+        mediaContentType: "IMAGE",
+        alt: image.colorName,
+      });
+    } catch (error) {
+      failures.push(
+        `Immagine ${image.fileName}: ${error instanceof Error ? error.message : "upload non riuscito"}`,
+      );
+    }
+  }
+
+  return media;
 }
 
 async function createVariants(

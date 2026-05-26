@@ -539,14 +539,7 @@ export default function NewProductWizard() {
                   <option>Accessori</option>
                 </select>
               </label>
-              <label className="check">
-                <input
-                  checked={Boolean(payload.publishNow)}
-                  onChange={(event) => setField("publishNow", event.currentTarget.checked)}
-                  type="checkbox"
-                />
-                Pubblica subito invece di creare in bozza
-              </label>
+              <p className="muted">Il prodotto verra creato sempre come bozza Shopify.</p>
             </div>
           ) : null}
 
@@ -1090,42 +1083,7 @@ async function postCreateProductWithDirectUploads(
     });
   }
 
-  const prepareResponse = await postJson<ActionResponse>(indexActionUrl(), {
-    intent: "prepareUploads",
-    files: uploadItems.map((item) => ({
-      key: item.key,
-      fileName: item.fileName,
-      mimeType: item.mimeType,
-      resource: item.resource,
-    })),
-  });
-
-  const targets = prepareResponse.uploadTargets ?? [];
-  if (targets.length !== uploadItems.length) {
-    throw new Error("Shopify non ha preparato tutti gli upload richiesti.");
-  }
-
-  await Promise.all(
-    uploadItems.map(async (item) => {
-      const target = targets.find((uploadTarget) => uploadTarget.key === item.key);
-      if (!target) throw new Error(`Upload non preparato per ${item.fileName}.`);
-
-      const formData = new FormData();
-      target.parameters.forEach((parameter) => {
-        formData.append(parameter.name, parameter.value);
-      });
-      formData.append("file", item.file);
-
-      const uploadResponse = await fetch(target.url, {
-        method: "POST",
-        body: formData,
-      });
-
-      if (!uploadResponse.ok) {
-        throw new Error(`Upload ${item.fileName} fallito (${uploadResponse.status}).`);
-      }
-    }),
-  );
+  const targets = await uploadFilesBestEffort(uploadItems);
 
   return postJson<ActionResponse>(indexActionUrl(), {
     intent: "createProduct",
@@ -1143,6 +1101,49 @@ async function postCreateProductWithDirectUploads(
         : undefined,
     },
   });
+}
+
+async function uploadFilesBestEffort(uploadItems: ClientUploadItem[]) {
+  if (!uploadItems.length) return [];
+
+  try {
+    const prepareResponse = await postJson<ActionResponse>(indexActionUrl(), {
+      intent: "prepareUploads",
+      files: uploadItems.map((item) => ({
+        key: item.key,
+        fileName: item.fileName,
+        mimeType: item.mimeType,
+        resource: item.resource,
+      })),
+    });
+
+    const targets = prepareResponse.uploadTargets ?? [];
+    if (targets.length !== uploadItems.length) return [];
+
+    const uploadedTargets = await Promise.all(
+      uploadItems.map(async (item) => {
+        const target = targets.find((uploadTarget) => uploadTarget.key === item.key);
+        if (!target) return null;
+
+        const formData = new FormData();
+        target.parameters.forEach((parameter) => {
+          formData.append(parameter.name, parameter.value);
+        });
+        formData.append("file", item.file);
+
+        const uploadResponse = await fetch(target.url, {
+          method: "POST",
+          body: formData,
+        });
+
+        return uploadResponse.ok ? target : null;
+      }),
+    );
+
+    return uploadedTargets.filter((target): target is PreparedUploadTarget => Boolean(target));
+  } catch {
+    return [];
+  }
 }
 
 function stripBinaryData(payload: ProductCreatorPayload): ProductCreatorPayload {
