@@ -149,16 +149,6 @@ export const productCreatorPayloadSchema = z
         });
       }
 
-      const duplicateSkus = findDuplicateVariantSkus(
-        generateFilmVariants(payload.images, payload.heights),
-      );
-      duplicateSkus.forEach((sku) => {
-        context.addIssue({
-          code: "custom",
-          path: ["images"],
-          message: `SKU variante duplicato: ${sku}. Usa SKU colore diversi oppure lascia vuoto lo SKU colore.`,
-        });
-      });
     }
   });
 
@@ -190,22 +180,11 @@ export function generateFilmVariants(
   heights: Pick<HeightInput, "id" | "label" | "value" | "handle">[],
 ): GeneratedVariant[] {
   const colorGroups = groupImagesByVariantColor(images);
-  const duplicateBaseSkus = new Set(findDuplicateValues(
-    colorGroups.map((group) => group.cover.colorSku ?? "").filter(Boolean),
-  ));
 
   return colorGroups.flatMap((group) =>
     heights.map((height) => {
       const baseSku = group.cover.colorSku?.trim();
-      const heightSlug = slugifyHandle(height.value || height.handle || height.label);
-      const colorSlug = slugifyHandle(group.name);
-      const sku = buildVariantSku({
-        baseSku,
-        colorSlug,
-        heightSlug,
-        hasDuplicateBaseSku: Boolean(baseSku && duplicateBaseSkus.has(baseSku)),
-        heightCount: heights.length,
-      });
+      const sku = buildVariantSku(baseSku);
 
       return {
         colorName: group.name,
@@ -248,28 +227,8 @@ export function groupImagesByVariantColor(
   }));
 }
 
-function buildVariantSku({
-  baseSku,
-  colorSlug,
-  heightSlug,
-  hasDuplicateBaseSku,
-  heightCount,
-}: {
-  baseSku?: string;
-  colorSlug: string;
-  heightSlug: string;
-  hasDuplicateBaseSku: boolean;
-  heightCount: number;
-}) {
-  if (!baseSku) return "";
-
-  if (hasDuplicateBaseSku) {
-    return heightCount === 1
-      ? `${baseSku}-${colorSlug}`
-      : `${baseSku}-${colorSlug}-${heightSlug}`;
-  }
-
-  return heightCount === 1 ? baseSku : `${baseSku}-${heightSlug}`;
+function buildVariantSku(baseSku?: string) {
+  return baseSku?.trim() || "";
 }
 
 export function generateAccessoryVariants(accessorySku?: string): GeneratedVariant[] {

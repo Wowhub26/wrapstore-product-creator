@@ -46,7 +46,7 @@ describe("product creator utilities", () => {
     expect(specHandle("Tipo di adesivo", "ABC 123")).toBe("tipo_di_adesivo_abc_123");
   });
 
-  it("generates Colore x Altezza film variants and height-specific SKUs", () => {
+  it("generates Colore x Altezza film variants and keeps the color SKU", () => {
     const variants = generateFilmVariants(
       [
         { fileName: "rosso.jpg", colorName: "Rosso", colorSku: "RS" },
@@ -60,10 +60,10 @@ describe("product creator utilities", () => {
 
     expect(variants).toHaveLength(4);
     expect(variants.map((variant) => variant.sku)).toEqual([
-      "RS-60-cm",
-      "RS-120-cm",
-      "BL-60-cm",
-      "BL-120-cm",
+      "RS",
+      "RS",
+      "BL",
+      "BL",
     ]);
   });
 
@@ -100,8 +100,8 @@ describe("product creator utilities", () => {
     );
 
     expect(variants.map((variant) => variant.sku)).toEqual([
-      "98814-76-cm",
-      "98814-51-cm",
+      "98814",
+      "98814",
     ]);
     expect(variants.map((variant) => variant.colorName)).toEqual([
       "Traffic Yellow",
@@ -111,10 +111,10 @@ describe("product creator utilities", () => {
       "Traffic Yellow_2",
       "Traffic Yellow_2",
     ]);
-    expect(findDuplicateVariantSkus(variants)).toEqual([]);
+    expect(findDuplicateVariantSkus(variants)).toEqual(["98814"]);
   });
 
-  it("disambiguates repeated color SKUs across distinct colors when there is only one height", () => {
+  it("allows repeated color SKUs across distinct colors", () => {
     const variants = generateFilmVariants(
       [
         { fileName: "yellow.jpg", colorName: "Traffic Yellow", colorSku: "98814" },
@@ -124,8 +124,8 @@ describe("product creator utilities", () => {
     );
 
     expect(variants.map((variant) => variant.sku)).toEqual([
-      "98814-traffic-yellow",
-      "98814-traffic-orange",
+      "98814",
+      "98814",
     ]);
   });
 
