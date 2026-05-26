@@ -53,11 +53,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return actionJson({ ok: false, errors: ["Payload mancante."] });
     }
 
-    if (intent === "saveDraft") {
-      const draftId = await saveDraft(session.shop, payload, body.draftId);
-      return actionJson({ ok: true, draftId });
-    }
-
     if (intent === "createProduct") {
       const limitErrors = validateUploadLimits(payload);
       if (limitErrors.length) {
@@ -85,8 +80,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         },
       );
 
-      if (payload.draftId || body.draftId) {
-        await saveDraft(session.shop, { ...payload, draftId: payload.draftId || body.draftId }, body.draftId);
+      if (result.ok || result.productId) {
+        await clearDrafts(session.shop);
       }
 
       return actionJson({ ok: result.ok, result, errors: result.ok ? undefined : result.failures });
@@ -116,66 +111,8 @@ function validateUploadLimits(payload: ProductCreatorPayload) {
   return errors;
 }
 
-async function saveDraft(shop: string, payload: ProductCreatorPayload, draftId?: string) {
-  const existing = draftId
-    ? await prisma.productDraft.findFirst({ where: { id: draftId, shop } })
-    : null;
-  const data = {
-    shop,
-    title: payload.title || null,
-    category: payload.category,
-    brand: payload.brand || null,
-    collectionId: payload.collectionId || null,
-    collectionTitle: payload.collectionTitle || null,
-    collectionType: payload.collectionType || null,
-    publishNow: false,
-    selectedHeights: payload.heights,
-    specs: payload.specs,
-    accessorySku: payload.accessorySku || null,
-    pdfFileName: payload.pdf?.fileName ?? null,
-    pdfMimeType: payload.pdf?.mimeType ?? null,
-    pdfSize: payload.pdf?.size ?? null,
-    pdfDataUrl: payload.pdf?.dataUrl ?? null,
-    payload: { ...payload, publishNow: false },
-  };
-
-  const draft = existing
-    ? await prisma.productDraft.update({
-        where: { id: existing.id },
-        data: {
-          ...data,
-          images: {
-            deleteMany: {},
-            create: payload.images.map((image, index) => ({
-              fileName: image.fileName,
-              mimeType: image.mimeType,
-              size: image.size,
-              colorName: image.colorName,
-              colorSku: image.colorSku || null,
-              previewDataUrl: image.dataUrl ?? null,
-              position: index,
-            })),
-          },
-        },
-      })
-    : await prisma.productDraft.create({
-        data: {
-          ...data,
-          images: {
-            create: payload.images.map((image, index) => ({
-              fileName: image.fileName,
-              mimeType: image.mimeType,
-              size: image.size,
-              colorName: image.colorName,
-              colorSku: image.colorSku || null,
-              previewDataUrl: image.dataUrl ?? null,
-              position: index,
-            })),
-          },
-        },
-      });
-
-  return draft.id;
+async function clearDrafts(shop: string) {
+  await prisma.productDraft.deleteMany({ where: { shop } });
 }
 
 async function safeLogActionError(shop: string, message: string, error: unknown) {

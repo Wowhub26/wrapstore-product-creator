@@ -1,6 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type {
-  ActionFunctionArgs,
   HeadersFunction,
   LoaderFunctionArgs,
 } from "react-router";
@@ -8,7 +7,6 @@ import { useLoaderData } from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
-import prisma from "../db.server";
 import {
   ACCEPTED_IMAGE_TYPES,
   generateFilmVariants,
@@ -21,16 +19,12 @@ import {
 } from "../lib/product-creator";
 import { getCollections, type ShopifyCollection } from "../services/shopify/collections.server";
 import { getHeightOptions } from "../services/shopify/metaobjects.server";
-import { createGuidedProduct, type CreateProductResult } from "../services/shopify/products.server";
-import { createStagedUploadTargets } from "../services/shopify/files.server";
-import { logOperation } from "../services/operation-log.server";
+import { type CreateProductResult } from "../services/shopify/products.server";
 
 type LoaderData = {
   collections: ShopifyCollection[];
   heights: HeightInput[];
   heightError?: string;
-  draft: ProductCreatorPayload | null;
-  draftId?: string;
   limits: {
     maxImages: number;
     maxPdfMb: number;
@@ -84,15 +78,8 @@ const EMPTY_PAYLOAD: ProductCreatorPayload = {
 };
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { admin, session } = await authenticate.admin(request);
-  const [collections, latestDraft] = await Promise.all([
-    getCollections(admin),
-    prisma.productDraft.findFirst({
-      where: { shop: session.shop },
-      orderBy: { updatedAt: "desc" },
-      include: { images: { orderBy: { position: "asc" } } },
-    }),
-  ]);
+  const { admin } = await authenticate.admin(request);
+  const collections = await getCollections(admin);
 
   let heights: HeightInput[] = [];
   let heightError: string | undefined;
@@ -102,16 +89,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     heightError = error instanceof Error ? error.message : "Errore recuperando le altezze.";
   }
 
-  const draft = latestDraft?.payload
-    ? normalizeDraftHeights(latestDraft.payload as ProductCreatorPayload, heights)
-    : null;
-
   return {
     collections,
     heights,
     heightError,
-    draft,
-    draftId: latestDraft?.id,
     limits: {
       maxImages: Number(process.env.MAX_PRODUCT_IMAGES ?? 24),
       maxPdfMb: Number(process.env.MAX_PRODUCT_PDF_MB ?? 20),
@@ -119,141 +100,19 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   } satisfies LoaderData;
 };
 
-export const action = async ({ request }: ActionFunctionArgs) => {
-  const { admin, session } = await authenticate.admin(request);
-  try {
-    const contentType = request.headers.get("content-type") ?? "";
-
-    if (contentType.includes("multipart/form-data")) {
-      const formData = await request.formData();
-      const intent = String(formData.get("intent") ?? "");
-      const payload = JSON.parse(String(formData.get("payload") ?? "{}")) as ProductCreatorPayload;
-      const draftId = String(formData.get("draftId") ?? "") || undefined;
-
-      if (intent !== "createProduct") {
-        return actionJson({ ok: false, errors: ["Azione multipart non riconosciuta."] });
-      }
-
-      const imageFiles = new Map<string, File>();
-      formData.forEach((value, key) => {
-        if (key.startsWith("image:") && value instanceof File) {
-          imageFiles.set(key.replace("image:", ""), value);
-        }
-      });
-      const pdfValue = formData.get("pdf");
-      const pdf = pdfValue instanceof File && pdfValue.size > 0 ? pdfValue : undefined;
-
-      const limitErrors = validateUploadLimits(payload);
-      if (limitErrors.length) {
-        return actionJson({ ok: false, errors: limitErrors });
-      }
-
-      const result = await createGuidedProduct(admin, session.shop, payload, {
-        images: imageFiles,
-        pdf,
-      });
-
-      if (payload.draftId || draftId) {
-        await saveDraft(session.shop, { ...payload, draftId: payload.draftId || draftId }, draftId);
-      }
-
-      return actionJson({ ok: result.ok, result, errors: result.ok ? undefined : result.failures });
-    }
-
-    const body = await request.json();
-    const intent = String(body.intent ?? "");
-    const payload = body.payload as ProductCreatorPayload | undefined;
-
-    if (intent === "prepareUploads") {
-      const files = (body.files ?? []) as Array<{
-        key: string;
-        fileName: string;
-        mimeType: string;
-        resource: "IMAGE" | "FILE";
-      }>;
-      const targets = await createStagedUploadTargets(admin, files);
-      return actionJson({
-        ok: true,
-        uploadTargets: targets.map((target, index) => ({
-          key: files[index].key,
-          ...target,
-        })),
-      });
-    }
-
-    if (!payload) {
-      return actionJson({ ok: false, errors: ["Payload mancante."] });
-    }
-
-    if (intent === "saveDraft") {
-      const draftId = await saveDraft(session.shop, payload, body.draftId);
-      return actionJson({ ok: true, draftId });
-    }
-
-    if (intent === "createProduct") {
-      const limitErrors = validateUploadLimits(payload);
-      if (limitErrors.length) {
-        return actionJson({ ok: false, errors: limitErrors });
-      }
-
-      const uploadedResources = body.uploadedResources as
-        | {
-            images?: Array<{ id: string; resourceUrl: string }>;
-            pdf?: { resourceUrl: string };
-          }
-        | undefined;
-      const imageResources = new Map(
-        uploadedResources?.images?.map((image) => [image.id, image.resourceUrl]) ?? [],
-      );
-
-      const result = await createGuidedProduct(
-        admin,
-        session.shop,
-        payload,
-        {},
-        {
-          images: imageResources,
-          pdf: uploadedResources?.pdf?.resourceUrl,
-        },
-      );
-      if (payload.draftId || body.draftId) {
-        await saveDraft(session.shop, { ...payload, draftId: payload.draftId || body.draftId }, body.draftId);
-      }
-      return actionJson({ ok: result.ok, result, errors: result.ok ? undefined : result.failures });
-    }
-
-    return actionJson({ ok: false, errors: ["Azione non riconosciuta."] });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Errore imprevisto durante l'operazione.";
-    await safeLogActionError(session.shop, message, error);
-    console.error("Product creator action failed", error);
-    return actionJson({
-      ok: false,
-      errors: [message],
-    });
-  }
-};
-
-function actionJson(body: ActionResponse) {
-  return Response.json(body);
-}
-
 export default function NewProductWizard() {
-  const { collections, heights, heightError, draft, draftId, limits } =
+  const { collections, heights, heightError, limits } =
     useLoaderData() as LoaderData;
   const shopify = useAppBridge();
   const [payload, setPayload] = useState<ProductCreatorPayload>({
     ...EMPTY_PAYLOAD,
-    ...(draft ?? {}),
-    draftId,
-    specs: mergeSpecs(draft?.specs),
+    specs: mergeSpecs(),
   });
   const [step, setStep] = useState(0);
   const [search, setSearch] = useState("");
   const [errors, setErrors] = useState<string[]>([]);
   const [result, setResult] = useState<CreateProductResult | null>(null);
   const [isSaving, setIsSaving] = useState(false);
-  const [isAutosaving, setIsAutosaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const pdfInputRef = useRef<HTMLInputElement | null>(null);
   const imageFilesRef = useRef<Map<string, File>>(new Map());
@@ -272,28 +131,6 @@ export default function NewProductWizard() {
         : [],
     [payload.category, payload.images, payload.heights],
   );
-
-  useEffect(() => {
-    const timeout = window.setTimeout(async () => {
-      if (!payload.title && !payload.collectionId && !payload.images.length) return;
-      setIsAutosaving(true);
-      try {
-        const sessionToken = await getShopifySessionToken(shopify);
-        const response = await postJson<ActionResponse>(productCreatorApiUrl(), {
-          intent: "saveDraft",
-          draftId: payload.draftId,
-          payload: stripBinaryData(payload),
-        }, sessionToken);
-        if (response.draftId && response.draftId !== payload.draftId) {
-          setPayload((current) => ({ ...current, draftId: response.draftId }));
-        }
-      } finally {
-        setIsAutosaving(false);
-      }
-    }, 900);
-
-    return () => window.clearTimeout(timeout);
-  }, [payload, shopify]);
 
   const setField = <TKey extends keyof ProductCreatorPayload>(
     key: TKey,
@@ -440,9 +277,7 @@ export default function NewProductWizard() {
             <p className="eyebrow">Wrapstore product creator</p>
             <h1>Nuovo prodotto guidato</h1>
           </div>
-          <span className="autosave">
-            {isAutosaving ? "Salvataggio bozza..." : payload.draftId ? "Bozza salvata" : "Nuova bozza"}
-          </span>
+          <span className="autosave">Nuovo prodotto</span>
         </header>
 
         <nav className="steps" aria-label="Avanzamento wizard">
@@ -883,21 +718,6 @@ function mergeSpecs(specs?: ProductSpecInput[]) {
   }));
 }
 
-function normalizeDraftHeights(
-  draft: ProductCreatorPayload,
-  availableHeights: HeightInput[],
-): ProductCreatorPayload {
-  if (!draft.heights?.length || !availableHeights.length) return draft;
-
-  return {
-    ...draft,
-    heights: draft.heights.map((selected) => {
-      const current = availableHeights.find((height) => height.id === selected.id);
-      return current ?? selected;
-    }),
-  };
-}
-
 function validateStep(step: number, payload: ProductCreatorPayload) {
   return stepErrors(step, payload).length === 0;
 }
@@ -912,79 +732,6 @@ function stepErrors(step: number, payload: ProductCreatorPayload) {
     return errors;
   }
   return [];
-}
-
-function validateUploadLimits(payload: ProductCreatorPayload) {
-  const errors: string[] = [];
-  const maxImages = Number(process.env.MAX_PRODUCT_IMAGES ?? 24);
-  const maxPdfMb = Number(process.env.MAX_PRODUCT_PDF_MB ?? 20);
-  if (payload.images.length > maxImages) errors.push(`Massimo ${maxImages} immagini.`);
-  if (payload.pdf && payload.pdf.size > maxPdfMb * 1024 * 1024) {
-    errors.push(`Il PDF supera il limite di ${maxPdfMb} MB.`);
-  }
-  return errors;
-}
-
-async function saveDraft(shop: string, payload: ProductCreatorPayload, draftId?: string) {
-  const existing = draftId
-    ? await prisma.productDraft.findFirst({ where: { id: draftId, shop } })
-    : null;
-  const data = {
-    shop,
-    title: payload.title || null,
-    category: payload.category,
-    brand: payload.brand || null,
-    collectionId: payload.collectionId || null,
-    collectionTitle: payload.collectionTitle || null,
-    collectionType: payload.collectionType || null,
-    publishNow: Boolean(payload.publishNow),
-    selectedHeights: payload.heights,
-    specs: payload.specs,
-    accessorySku: payload.accessorySku || null,
-    pdfFileName: payload.pdf?.fileName ?? null,
-    pdfMimeType: payload.pdf?.mimeType ?? null,
-    pdfSize: payload.pdf?.size ?? null,
-    pdfDataUrl: payload.pdf?.dataUrl ?? null,
-    payload,
-  };
-
-  const draft = existing
-    ? await prisma.productDraft.update({
-        where: { id: existing.id },
-        data: {
-          ...data,
-          images: {
-            deleteMany: {},
-            create: payload.images.map((image, index) => ({
-              fileName: image.fileName,
-              mimeType: image.mimeType,
-              size: image.size,
-              colorName: image.colorName,
-              colorSku: image.colorSku || null,
-              previewDataUrl: image.dataUrl ?? null,
-              position: index,
-            })),
-          },
-        },
-      })
-    : await prisma.productDraft.create({
-        data: {
-          ...data,
-          images: {
-            create: payload.images.map((image, index) => ({
-              fileName: image.fileName,
-              mimeType: image.mimeType,
-              size: image.size,
-              colorName: image.colorName,
-              colorSku: image.colorSku || null,
-              previewDataUrl: image.dataUrl ?? null,
-              position: index,
-            })),
-          },
-        },
-      });
-
-  return draft.id;
 }
 
 async function readFileAsDataUrl(file: File) {
@@ -1053,32 +800,6 @@ function stripHtmlForMessage(text: string) {
     .slice(0, 500);
 }
 
-async function safeLogActionError(shop: string, message: string, error: unknown) {
-  try {
-    await logOperation({
-      shop,
-      operation: "product_creator:action_error",
-      status: "ERROR",
-      userMessage: message,
-      technicalDetail: serializeError(error),
-    });
-  } catch (logError) {
-    console.error("OperationLog failed", logError);
-  }
-}
-
-function serializeError(error: unknown) {
-  if (error instanceof Error) {
-    return {
-      name: error.name,
-      message: error.message,
-      stack: error.stack,
-    };
-  }
-
-  return { message: String(error) };
-}
-
 async function postCreateProductWithDirectUploads(
   payload: ProductCreatorPayload,
   imageFiles: Map<string, File>,
@@ -1107,8 +828,7 @@ async function postCreateProductWithDirectUploads(
 
   return postJson<ActionResponse>(productCreatorApiUrl(), {
     intent: "createProduct",
-    draftId: payload.draftId,
-    payload,
+    payload: { ...payload, draftId: undefined },
     uploadedResources: {
       images: targets
         .filter((target) => target.key.startsWith("image:"))
@@ -1169,6 +889,7 @@ async function uploadFilesBestEffort(uploadItems: ClientUploadItem[], sessionTok
 function stripBinaryData(payload: ProductCreatorPayload): ProductCreatorPayload {
   return {
     ...payload,
+    draftId: undefined,
     images: payload.images.map((image) => ({
       ...image,
       dataUrl: undefined,
