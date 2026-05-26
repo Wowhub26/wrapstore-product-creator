@@ -13,7 +13,12 @@ import {
   type ShopifyAdminClient,
 } from "./common.server";
 import { addProductToCollection } from "./collections.server";
-import { createShopifyFile, stagedUploadFromDataUrl } from "./files.server";
+import {
+  createShopifyFile,
+  createShopifyFileFromUpload,
+  stagedUploadFile,
+  stagedUploadFromDataUrl,
+} from "./files.server";
 import { createProductSpecEntries } from "./metaobjects.server";
 import { getProductMetafieldDefinition, setProductMetafields } from "./metafields.server";
 
@@ -106,10 +111,16 @@ export type CreateProductResult = {
   failures: string[];
 };
 
+export type ProductUploadFiles = {
+  images?: Map<string, File>;
+  pdf?: File;
+};
+
 export async function createGuidedProduct(
   admin: ShopifyAdminClient,
   shop: string,
   unsafePayload: unknown,
+  uploadFiles: ProductUploadFiles = {},
 ): Promise<CreateProductResult> {
   const parsed = productCreatorPayloadSchema.safeParse(unsafePayload);
   if (!parsed.success) {
@@ -140,7 +151,10 @@ export async function createGuidedProduct(
 
     const imageMedia = await Promise.all(
       payload.images.map(async (image) => {
-        const staged = await stagedUploadFromDataUrl(admin, image, "IMAGE");
+        const upload = image.id ? uploadFiles.images?.get(image.id) : undefined;
+        const staged = upload
+          ? await stagedUploadFile(admin, image, upload, "IMAGE")
+          : await stagedUploadFromDataUrl(admin, image, "IMAGE");
         return {
           originalSource: staged.resourceUrl,
           mediaContentType: "IMAGE" as const,
@@ -183,12 +197,18 @@ export async function createGuidedProduct(
     });
 
     await runPostCreateStep(failures, "PDF info prodotto", async () => {
-      if (!payload.pdf?.dataUrl) return;
-      const pdfFileId = await createShopifyFile(
-        admin,
-        payload.pdf,
-        `Info prodotto ${payload.title}`,
-      );
+      if (!payload.pdf) return;
+      const pdfFileId = uploadFiles.pdf
+        ? await createShopifyFileFromUpload(
+            admin,
+            payload.pdf,
+            uploadFiles.pdf,
+            `Info prodotto ${payload.title}`,
+          )
+        : payload.pdf.dataUrl
+          ? await createShopifyFile(admin, payload.pdf, `Info prodotto ${payload.title}`)
+          : null;
+      if (!pdfFileId) return;
       await attachPdfMetafield(admin, productId!, pdfFileId);
     });
 

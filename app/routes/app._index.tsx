@@ -103,6 +103,44 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
+  const contentType = request.headers.get("content-type") ?? "";
+
+  if (contentType.includes("multipart/form-data")) {
+    const formData = await request.formData();
+    const intent = String(formData.get("intent") ?? "");
+    const payload = JSON.parse(String(formData.get("payload") ?? "{}")) as ProductCreatorPayload;
+    const draftId = String(formData.get("draftId") ?? "") || undefined;
+
+    if (intent !== "createProduct") {
+      return { ok: false, errors: ["Azione multipart non riconosciuta."] } satisfies ActionResponse;
+    }
+
+    const imageFiles = new Map<string, File>();
+    formData.forEach((value, key) => {
+      if (key.startsWith("image:") && value instanceof File) {
+        imageFiles.set(key.replace("image:", ""), value);
+      }
+    });
+    const pdfValue = formData.get("pdf");
+    const pdf = pdfValue instanceof File && pdfValue.size > 0 ? pdfValue : undefined;
+
+    const limitErrors = validateUploadLimits(payload);
+    if (limitErrors.length) {
+      return { ok: false, errors: limitErrors } satisfies ActionResponse;
+    }
+
+    const result = await createGuidedProduct(admin, session.shop, payload, {
+      images: imageFiles,
+      pdf,
+    });
+
+    if (payload.draftId || draftId) {
+      await saveDraft(session.shop, { ...payload, draftId: payload.draftId || draftId }, draftId);
+    }
+
+    return { ok: result.ok, result, errors: result.ok ? undefined : result.failures } satisfies ActionResponse;
+  }
+
   const body = await request.json();
   const intent = String(body.intent ?? "");
   const payload = body.payload as ProductCreatorPayload;
@@ -146,6 +184,8 @@ export default function NewProductWizard() {
   const [isAutosaving, setIsAutosaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const pdfInputRef = useRef<HTMLInputElement | null>(null);
+  const imageFilesRef = useRef<Map<string, File>>(new Map());
+  const pdfFileRef = useRef<File | null>(null);
 
   const selectedCollection = collections.find(
     (collection) => collection.id === payload.collectionId,
@@ -169,7 +209,7 @@ export default function NewProductWizard() {
         const response = await postJson<ActionResponse>("/app", {
           intent: "saveDraft",
           draftId: payload.draftId,
-          payload,
+          payload: stripBinaryData(payload),
         });
         if (response.draftId && response.draftId !== payload.draftId) {
           setPayload((current) => ({ ...current, draftId: response.draftId }));
@@ -209,16 +249,20 @@ export default function NewProductWizard() {
     }
 
     const images = await Promise.all(
-      nextFiles.map(async (file, index) => ({
-        id: crypto.randomUUID(),
-        fileName: file.name,
-        mimeType: file.type,
-        size: file.size,
-        dataUrl: await readFileAsDataUrl(file),
-        colorName: normalizeColorNameFromFilename(file.name),
-        colorSku: "",
-        position: payload.images.length + index,
-      })),
+      nextFiles.map(async (file, index) => {
+        const id = crypto.randomUUID();
+        imageFilesRef.current.set(id, file);
+        return {
+          id,
+          fileName: file.name,
+          mimeType: file.type,
+          size: file.size,
+          dataUrl: await readFileAsDataUrl(file),
+          colorName: normalizeColorNameFromFilename(file.name),
+          colorSku: "",
+          position: payload.images.length + index,
+        };
+      }),
     );
 
     setPayload((current) => ({ ...current, images: [...current.images, ...images] }));
@@ -235,6 +279,7 @@ export default function NewProductWizard() {
   };
 
   const removeImage = (id: string | undefined) => {
+    if (id) imageFilesRef.current.delete(id);
     setPayload((current) => ({
       ...current,
       images: current.images.filter((image) => image.id !== id),
@@ -253,6 +298,7 @@ export default function NewProductWizard() {
     }
 
     const dataUrl = await readFileAsDataUrl(file);
+    pdfFileRef.current = file;
     setPayload((current) => ({
       ...current,
       pdf: {
@@ -288,11 +334,11 @@ export default function NewProductWizard() {
     setIsSaving(true);
     setResult(null);
     try {
-      const response = await postJson<ActionResponse>("/app", {
-        intent: "createProduct",
-        draftId: payload.draftId,
-        payload,
-      });
+      const response = await postCreateProductForm(
+        stripBinaryData(payload),
+        imageFilesRef.current,
+        pdfFileRef.current,
+      );
       if (response.errors?.length) setErrors(response.errors);
       if (response.result) {
         setResult(response.result);
@@ -897,6 +943,55 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
   }
 
   return response.json();
+}
+
+async function postCreateProductForm(
+  payload: ProductCreatorPayload,
+  imageFiles: Map<string, File>,
+  pdfFile: File | null,
+): Promise<ActionResponse> {
+  const formData = new FormData();
+  formData.append("intent", "createProduct");
+  if (payload.draftId) formData.append("draftId", payload.draftId);
+  formData.append("payload", JSON.stringify(payload));
+
+  payload.images.forEach((image) => {
+    if (!image.id) return;
+    const file = imageFiles.get(image.id);
+    if (file) formData.append(`image:${image.id}`, file);
+  });
+
+  if (pdfFile) formData.append("pdf", pdfFile);
+
+  const response = await fetch("/app", {
+    method: "POST",
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(
+      text.trim() || `Richiesta fallita (${response.status}). Riprova o controlla i log Render.`,
+    );
+  }
+
+  return response.json();
+}
+
+function stripBinaryData(payload: ProductCreatorPayload): ProductCreatorPayload {
+  return {
+    ...payload,
+    images: payload.images.map((image) => ({
+      ...image,
+      dataUrl: undefined,
+    })),
+    pdf: payload.pdf
+      ? {
+          ...payload.pdf,
+          dataUrl: undefined,
+        }
+      : payload.pdf,
+  };
 }
 
 const steps = ["Collezione", "Base", "Configurazione", "File e specs", "Review"];
