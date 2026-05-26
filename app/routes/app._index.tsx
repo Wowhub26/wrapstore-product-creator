@@ -68,8 +68,6 @@ const SPEC_FIELDS: ProductSpecInput[] = [
   { key: "metodo_applicazione", title: "Metodo di applicazione", value: "" },
 ];
 
-const INDEX_ACTION_URL = "/app?index";
-
 const EMPTY_PAYLOAD: ProductCreatorPayload = {
   collectionId: "",
   collectionTitle: "",
@@ -276,7 +274,7 @@ export default function NewProductWizard() {
       if (!payload.title && !payload.collectionId && !payload.images.length) return;
       setIsAutosaving(true);
       try {
-        const response = await postJson<ActionResponse>(INDEX_ACTION_URL, {
+        const response = await postJson<ActionResponse>(indexActionUrl(), {
           intent: "saveDraft",
           draftId: payload.draftId,
           payload: stripBinaryData(payload),
@@ -1012,7 +1010,31 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
     );
   }
 
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.includes("application/json")) {
+    const text = await response.text();
+    throw new Error(
+      `Il server ha restituito una risposta non JSON (${response.status}). ${stripHtmlForMessage(text)}`,
+    );
+  }
+
   return response.json();
+}
+
+function indexActionUrl() {
+  const url = new URL(window.location.href);
+  url.searchParams.set("index", "");
+  return `${url.pathname}${url.search}`;
+}
+
+function stripHtmlForMessage(text: string) {
+  return text
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 500);
 }
 
 async function safeLogActionError(shop: string, message: string, error: unknown) {
@@ -1064,7 +1086,7 @@ async function postCreateProductWithDirectUploads(
     });
   }
 
-  const prepareResponse = await postJson<ActionResponse>(INDEX_ACTION_URL, {
+  const prepareResponse = await postJson<ActionResponse>(indexActionUrl(), {
     intent: "prepareUploads",
     files: uploadItems.map((item) => ({
       key: item.key,
@@ -1101,7 +1123,7 @@ async function postCreateProductWithDirectUploads(
     }),
   );
 
-  return postJson<ActionResponse>(INDEX_ACTION_URL, {
+  return postJson<ActionResponse>(indexActionUrl(), {
     intent: "createProduct",
     draftId: payload.draftId,
     payload,
