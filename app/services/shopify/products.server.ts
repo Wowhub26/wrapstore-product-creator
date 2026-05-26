@@ -431,9 +431,10 @@ async function attachPdfMetafield(
     "file_info_del_prodotto",
   );
 
-  if (definition && definition.type.name !== "file_reference") {
+  const metafieldType = definition?.type.name ?? "file_reference";
+  if (!["file_reference", "list.file_reference"].includes(metafieldType)) {
     throw new Error(
-      "Il metafield custom.file_info_del_prodotto esiste ma non e di tipo file_reference.",
+      "Il metafield custom.file_info_del_prodotto esiste ma non e di tipo file_reference/list.file_reference.",
     );
   }
 
@@ -442,8 +443,8 @@ async function attachPdfMetafield(
       ownerId: productId,
       namespace: "custom",
       key: "file_info_del_prodotto",
-      type: "file_reference",
-      value: fileId,
+      type: metafieldType,
+      value: metafieldType === "list.file_reference" ? JSON.stringify([fileId]) : fileId,
     },
   ]);
 }

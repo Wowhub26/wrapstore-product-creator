@@ -1,6 +1,5 @@
 import {
-  resolveProductSpecsMapping,
-  specHandle,
+  slugifyHandle,
   type ProductSpecInput,
 } from "../../lib/product-creator";
 import { assertNoUserErrors, shopifyGraphql, type ShopifyAdminClient } from "./common.server";
@@ -240,17 +239,12 @@ export async function createProductSpecEntries(
     process.env.PRODUCT_SPECS_METAOBJECT_TYPE ||
     metafieldDefinition?.validations.find((validation) =>
       ["metaobject_definition_type", "metaobject_type"].includes(validation.name),
-    )?.value;
+    )?.value ||
+    "specifiche_prodotto";
 
   if (!metafieldDefinition?.type.name.includes("metaobject_reference")) {
     throw new Error(
       "custom.product_specs deve essere una lista di riferimenti metaobject compatibile.",
-    );
-  }
-
-  if (!typeFromDefinition) {
-    throw new Error(
-      "Tipo metaobject per custom.product_specs non risolto. Imposta PRODUCT_SPECS_METAOBJECT_TYPE.",
     );
   }
 
@@ -265,41 +259,31 @@ export async function createProductSpecEntries(
     throw new Error(`Metaobject definition "${typeFromDefinition}" non trovata.`);
   }
 
-  const mapping = resolveProductSpecsMapping(
+  const fields = buildProductSpecsFields(
     definition.metaobjectDefinitionByType.fieldDefinitions,
-    process.env,
+    filledSpecs,
   );
 
-  const createdIds: string[] = [];
+  if (!fields.length) return [];
 
-  for (const spec of filledSpecs) {
-    const fields = [
-      { key: mapping.titleField, value: spec.title },
-      { key: mapping.valueField, value: spec.value?.trim() ?? "" },
-    ];
+  const data = await shopifyGraphql<{
+    metaobjectCreate: {
+      metaobject: { id: string } | null;
+      userErrors: Array<{ message: string }>;
+    };
+  }>(admin, METAOBJECT_CREATE, {
+    metaobject: {
+      type: typeFromDefinition,
+      handle: `${slugifyHandle(sku).replace(/-/g, "_")}_specifiche_prodotto`,
+      fields,
+    },
+  });
 
-    if (mapping.skuField) {
-      fields.push({ key: mapping.skuField, value: sku });
-    }
+  assertNoUserErrors(data.metaobjectCreate.userErrors, "Creazione specifiche prodotto");
 
-    const data = await shopifyGraphql<{
-      metaobjectCreate: {
-        metaobject: { id: string } | null;
-        userErrors: Array<{ message: string }>;
-      };
-    }>(admin, METAOBJECT_CREATE, {
-      metaobject: {
-        type: typeFromDefinition,
-        handle: specHandle(spec.title, sku),
-        fields,
-      },
-    });
-
-    assertNoUserErrors(data.metaobjectCreate.userErrors, `Creazione specifica ${spec.title}`);
-
-    if (data.metaobjectCreate.metaobject?.id) {
-      createdIds.push(data.metaobjectCreate.metaobject.id);
-    }
+  const createdId = data.metaobjectCreate.metaobject?.id;
+  if (!createdId) {
+    throw new Error("Shopify non ha creato la voce specifiche prodotto.");
   }
 
   await setProductMetafields(admin, [
@@ -308,9 +292,34 @@ export async function createProductSpecEntries(
       namespace: "custom",
       key: "product_specs",
       type: metafieldDefinition.type.name,
-      value: JSON.stringify(createdIds),
+      value: metafieldDefinition.type.name.startsWith("list.")
+        ? JSON.stringify([createdId])
+        : createdId,
     },
   ]);
 
-  return createdIds;
+  return [createdId];
+}
+
+function buildProductSpecsFields(
+  definitionFields: { key: string }[],
+  specs: ProductSpecInput[],
+) {
+  const specByNormalizedTitle = new Map(
+    specs.map((spec) => [normalizeSpecKey(spec.title), spec.value?.trim() ?? ""]),
+  );
+
+  return definitionFields.flatMap((field) => {
+    const value = specByNormalizedTitle.get(normalizeSpecKey(field.key));
+    return value ? [{ key: field.key, value }] : [];
+  });
+}
+
+function normalizeSpecKey(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
 }
