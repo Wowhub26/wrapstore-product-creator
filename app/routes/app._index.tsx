@@ -278,11 +278,12 @@ export default function NewProductWizard() {
       if (!payload.title && !payload.collectionId && !payload.images.length) return;
       setIsAutosaving(true);
       try {
+        const sessionToken = await getShopifySessionToken(shopify);
         const response = await postJson<ActionResponse>(productCreatorApiUrl(), {
           intent: "saveDraft",
           draftId: payload.draftId,
           payload: stripBinaryData(payload),
-        });
+        }, sessionToken);
         if (response.draftId && response.draftId !== payload.draftId) {
           setPayload((current) => ({ ...current, draftId: response.draftId }));
         }
@@ -292,7 +293,7 @@ export default function NewProductWizard() {
     }, 900);
 
     return () => window.clearTimeout(timeout);
-  }, [payload]);
+  }, [payload, shopify]);
 
   const setField = <TKey extends keyof ProductCreatorPayload>(
     key: TKey,
@@ -406,10 +407,12 @@ export default function NewProductWizard() {
     setIsSaving(true);
     setResult(null);
     try {
+      const sessionToken = await getShopifySessionToken(shopify);
       const response = await postCreateProductWithDirectUploads(
         stripBinaryData(payload),
         imageFilesRef.current,
         pdfFileRef.current,
+        sessionToken,
       );
       if (response.errors?.length) setErrors(response.errors);
       if (response.result) {
@@ -993,10 +996,13 @@ async function readFileAsDataUrl(file: File) {
   });
 }
 
-async function postJson<T>(url: string, body: unknown): Promise<T> {
+async function postJson<T>(url: string, body: unknown, sessionToken?: string): Promise<T> {
   const response = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
+    },
     body: JSON.stringify(body),
   });
 
@@ -1016,6 +1022,19 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
   }
 
   return response.json();
+}
+
+async function getShopifySessionToken(shopify: unknown) {
+  if (
+    typeof shopify === "object" &&
+    shopify !== null &&
+    "idToken" in shopify &&
+    typeof shopify.idToken === "function"
+  ) {
+    return shopify.idToken();
+  }
+
+  return undefined;
 }
 
 function productCreatorApiUrl() {
@@ -1064,6 +1083,7 @@ async function postCreateProductWithDirectUploads(
   payload: ProductCreatorPayload,
   imageFiles: Map<string, File>,
   pdfFile: File | null,
+  sessionToken?: string,
 ): Promise<ActionResponse> {
   const uploadItems: ClientUploadItem[] = payload.images.flatMap((image) => {
     if (!image.id) return [];
@@ -1083,7 +1103,7 @@ async function postCreateProductWithDirectUploads(
     });
   }
 
-  const targets = await uploadFilesBestEffort(uploadItems);
+  const targets = await uploadFilesBestEffort(uploadItems, sessionToken);
 
   return postJson<ActionResponse>(productCreatorApiUrl(), {
     intent: "createProduct",
@@ -1100,10 +1120,10 @@ async function postCreateProductWithDirectUploads(
         ? { resourceUrl: targets.find((target) => target.key === "pdf")!.resourceUrl }
         : undefined,
     },
-  });
+  }, sessionToken);
 }
 
-async function uploadFilesBestEffort(uploadItems: ClientUploadItem[]) {
+async function uploadFilesBestEffort(uploadItems: ClientUploadItem[], sessionToken?: string) {
   if (!uploadItems.length) return [];
 
   try {
@@ -1115,7 +1135,7 @@ async function uploadFilesBestEffort(uploadItems: ClientUploadItem[]) {
         mimeType: item.mimeType,
         resource: item.resource,
       })),
-    });
+    }, sessionToken);
 
     const targets = prepareResponse.uploadTargets ?? [];
     if (targets.length !== uploadItems.length) return [];
