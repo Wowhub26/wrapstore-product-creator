@@ -14,6 +14,7 @@ export type ColorImageInput = {
   dataUrl?: string;
   colorName: string;
   variantColorName?: string;
+  colorHex?: string;
   colorSku?: string;
   isColorCover?: boolean;
   position?: number;
@@ -55,6 +56,7 @@ export type ProductCreatorPayload = {
 
 export type GeneratedVariant = {
   colorName?: string;
+  colorHex?: string;
   heightLabel?: string;
   sku?: string;
   optionValues: { optionName: string; name: string }[];
@@ -70,6 +72,13 @@ export type ProductSpecsMapping = {
 };
 
 const nonEmptyString = z.string().trim().min(1);
+const hexColorSchema = z
+  .string()
+  .trim()
+  .transform((value) => normalizeHexColor(value))
+  .refine((value) => !value || isValidHexColor(value), {
+    message: "Il colore HEX deve essere nel formato #RRGGBB.",
+  });
 
 export const colorImageSchema = z.object({
   id: z.string().optional(),
@@ -79,6 +88,7 @@ export const colorImageSchema = z.object({
   dataUrl: z.string().optional(),
   colorName: nonEmptyString,
   variantColorName: z.string().trim().optional(),
+  colorHex: hexColorSchema.optional(),
   colorSku: z.string().trim().optional(),
   isColorCover: z.boolean().optional(),
   position: z.number().int().nonnegative().optional(),
@@ -175,8 +185,63 @@ export function slugifyHandle(value: string) {
     .replace(/-{2,}/g, "-");
 }
 
+export function normalizeHexColor(value?: string | null) {
+  const normalized = String(value ?? "")
+    .trim()
+    .replace(/^#?/, "#")
+    .toUpperCase();
+
+  if (/^#[0-9A-F]{3}$/.test(normalized)) {
+    return `#${normalized
+      .slice(1)
+      .split("")
+      .map((char) => `${char}${char}`)
+      .join("")}`;
+  }
+
+  return normalized;
+}
+
+export function isValidHexColor(value?: string | null) {
+  return /^#[0-9A-F]{6}$/.test(normalizeHexColor(value));
+}
+
+export function suggestedHexFromColorName(value?: string | null) {
+  const normalized = value
+    ?.normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+
+  if (!normalized) return undefined;
+
+  const namedColors: Array<[string[], string]> = [
+    [["black", "nero", "midnight"], "#1F1F1F"],
+    [["white", "bianco", "sparkling white"], "#F5F5F0"],
+    [["red", "rosso", "ruby", "burgundy"], "#A61E24"],
+    [["blue", "blu", "navy", "ocean"], "#1E3A6D"],
+    [["green", "verde", "olive", "salvia"], "#4E6B47"],
+    [["yellow", "giallo", "gold", "oro"], "#C99A1A"],
+    [["orange", "arancio", "orange", "copper"], "#C96A2B"],
+    [["pink", "rosa"], "#C85A9E"],
+    [["purple", "viola"], "#6D4A8E"],
+    [["brown", "marrone", "mocha", "cinnamon", "bronze"], "#6A4532"],
+    [["grey", "gray", "grigio", "silver", "argento"], "#8D939A"],
+    [["beige", "champagne", "sand", "sabbia", "ivory", "avorio"], "#C7B38A"],
+  ];
+
+  const exact = namedColors.find(([aliases]) =>
+    aliases.some((alias) => normalized.includes(alias)),
+  );
+  return exact?.[1];
+}
+
 export function generateFilmVariants(
-  images: Pick<ColorImageInput, "colorName" | "variantColorName" | "colorSku" | "fileName" | "isColorCover">[],
+  images: Pick<
+    ColorImageInput,
+    "colorName" | "variantColorName" | "colorHex" | "colorSku" | "fileName" | "isColorCover"
+  >[],
   heights: Pick<HeightInput, "id" | "label" | "value" | "handle">[],
 ): GeneratedVariant[] {
   const colorGroups = groupImagesByVariantColor(images);
@@ -188,6 +253,7 @@ export function generateFilmVariants(
 
       return {
         colorName: group.name,
+        colorHex: group.cover.colorHex,
         heightLabel: height.label,
         sku,
         mediaFileName: group.cover.fileName,
@@ -202,7 +268,10 @@ export function generateFilmVariants(
 }
 
 export function groupImagesByVariantColor(
-  images: Pick<ColorImageInput, "colorName" | "variantColorName" | "colorSku" | "fileName" | "isColorCover">[],
+  images: Pick<
+    ColorImageInput,
+    "colorName" | "variantColorName" | "colorHex" | "colorSku" | "fileName" | "isColorCover"
+  >[],
 ) {
   const groups = new Map<
     string,

@@ -3,12 +3,15 @@ import {
   findDuplicateVariantSkus,
   generateFilmVariants,
   groupImagesByVariantColor,
+  isValidHexColor,
+  normalizeHexColor,
   normalizeImageTitleFromFilename,
   normalizeColorNameFromFilename,
   productCreatorPayloadSchema,
   resolveProductSpecsMapping,
   slugifyHandle,
   specHandle,
+  suggestedHexFromColorName,
 } from "./product-creator";
 
 describe("product creator utilities", () => {
@@ -25,20 +28,35 @@ describe("product creator utilities", () => {
         fileName: "yellow-1.jpg",
         colorName: "Traffic Yellow_1",
         variantColorName: "Traffic Yellow",
+        colorHex: "#D7B400",
         isColorCover: false,
       },
       {
         fileName: "yellow-2.jpg",
         colorName: "Traffic Yellow_2",
         variantColorName: "Traffic Yellow",
+        colorHex: "#D4AF37",
         isColorCover: true,
       },
     ])).toMatchObject([
       {
         name: "Traffic Yellow",
-        cover: { colorName: "Traffic Yellow_2" },
+        cover: { colorName: "Traffic Yellow_2", colorHex: "#D4AF37" },
       },
     ]);
+  });
+
+  it("normalizes and validates HEX colors", () => {
+    expect(normalizeHexColor("a36b43")).toBe("#A36B43");
+    expect(normalizeHexColor("#abc")).toBe("#AABBCC");
+    expect(isValidHexColor("#A36B43")).toBe(true);
+    expect(isValidHexColor("rosso")).toBe(false);
+  });
+
+  it("suggests fallback HEX colors from names", () => {
+    expect(suggestedHexFromColorName("Black Disco")).toBe("#1F1F1F");
+    expect(suggestedHexFromColorName("Cinnamon Spice")).toBe("#6A4532");
+    expect(suggestedHexFromColorName("Champagne")).toBe("#C7B38A");
   });
 
   it("slugifies handles for Shopify/metaobject usage", () => {
@@ -50,7 +68,7 @@ describe("product creator utilities", () => {
     const variants = generateFilmVariants(
       [
         { fileName: "rosso.jpg", colorName: "Rosso", colorSku: "RS" },
-        { fileName: "blu.jpg", colorName: "Blu", colorSku: "BL" },
+        { fileName: "blu.jpg", colorName: "Blu", colorSku: "BL", colorHex: "#2244AA" },
       ],
       [
         { id: "h1", label: "60 cm" },
@@ -65,6 +83,7 @@ describe("product creator utilities", () => {
       "BL",
       "BL",
     ]);
+    expect(variants[2]?.colorHex).toBe("#2244AA");
   });
 
   it("keeps base color SKU when a film has one height", () => {
@@ -83,12 +102,14 @@ describe("product creator utilities", () => {
           fileName: "yellow-1.jpg",
           colorName: "Traffic Yellow_1",
           variantColorName: "Traffic Yellow",
+          colorHex: "#D7B400",
           colorSku: "98814",
         },
         {
           fileName: "yellow-2.jpg",
           colorName: "Traffic Yellow_2",
           variantColorName: "Traffic Yellow",
+          colorHex: "#D4AF37",
           colorSku: "98814",
           isColorCover: true,
         },
@@ -110,6 +131,10 @@ describe("product creator utilities", () => {
     expect(variants.map((variant) => variant.mediaAlt)).toEqual([
       "Traffic Yellow_2",
       "Traffic Yellow_2",
+    ]);
+    expect(variants.map((variant) => variant.colorHex)).toEqual([
+      "#D4AF37",
+      "#D4AF37",
     ]);
     expect(findDuplicateVariantSkus(variants)).toEqual(["98814"]);
   });

@@ -11,7 +11,10 @@ import {
   ACCEPTED_IMAGE_TYPES,
   generateFilmVariants,
   groupImagesByVariantColor,
+  isValidHexColor,
+  normalizeHexColor,
   normalizeImageTitleFromFilename,
+  suggestedHexFromColorName,
   variantColorNameFromImageTitle,
   productCreatorPayloadSchema,
   type ColorImageInput,
@@ -163,15 +166,20 @@ export default function NewProductWizard() {
     const images = await Promise.all(
       nextFiles.map(async (file, index) => {
         const id = crypto.randomUUID();
+        const colorName = normalizeImageTitleFromFilename(file.name);
+        const dataUrl = await readFileAsDataUrl(file);
         imageFilesRef.current.set(id, file);
         return {
           id,
           fileName: file.name,
           mimeType: file.type,
           size: file.size,
-          dataUrl: await readFileAsDataUrl(file),
-          colorName: normalizeImageTitleFromFilename(file.name),
-          variantColorName: variantColorNameFromImageTitle(normalizeImageTitleFromFilename(file.name)),
+          dataUrl,
+          colorName,
+          variantColorName: variantColorNameFromImageTitle(colorName),
+          colorHex: await inferSuggestedHexColor(dataUrl, colorName).catch(
+            () => suggestedHexFromColorName(colorName) || "",
+          ),
           colorSku: "",
           isColorCover: false,
           position: payload.images.length + index,
@@ -205,6 +213,19 @@ export default function NewProductWizard() {
       ...current,
       images: ensureColorCovers(current.images.filter((image) => image.id !== id)),
     }));
+  };
+
+  const autofillImageHex = async (id: string | undefined) => {
+    if (!id) return;
+    const image = payload.images.find((item) => item.id === id);
+    if (!image?.dataUrl) return;
+
+    const suggestedHex = await inferSuggestedHexColor(
+      image.dataUrl,
+      image.variantColorName || image.colorName,
+    ).catch(() => suggestedHexFromColorName(image.variantColorName || image.colorName) || "");
+    if (!suggestedHex) return;
+    updateImage(id, { colorHex: suggestedHex });
   };
 
   const setPdf = async (file: File | undefined) => {
@@ -401,6 +422,7 @@ export default function NewProductWizard() {
               onAddImages={addImages}
               onRemoveImage={removeImage}
               onSetHeights={(selected) => setField("heights", selected)}
+              onAutofillHex={autofillImageHex}
               onUpdateImage={updateImage}
               payload={payload}
             />
@@ -411,6 +433,7 @@ export default function NewProductWizard() {
               fileInputRef={fileInputRef}
               limits={limits}
               onAddImages={addImages}
+              onAutofillHex={autofillImageHex}
               onRemoveImage={removeImage}
               onUpdateImage={updateImage}
               payload={payload}
@@ -498,6 +521,7 @@ function FilmStep({
   heights,
   limits,
   onAddImages,
+  onAutofillHex,
   onRemoveImage,
   onSetHeights,
   onUpdateImage,
@@ -508,6 +532,7 @@ function FilmStep({
   heights: HeightInput[];
   limits: LoaderData["limits"];
   onAddImages: (files: FileList | File[]) => void;
+  onAutofillHex: (id?: string) => void;
   onRemoveImage: (id?: string) => void;
   onSetHeights: (heights: HeightInput[]) => void;
   onUpdateImage: (id: string | undefined, patch: Partial<ColorImageInput>) => void;
@@ -517,7 +542,12 @@ function FilmStep({
     <div className="stack">
       <h2>Configurazione Pellicole</h2>
       <DropZone fileInputRef={fileInputRef} limits={limits} onAddImages={onAddImages} />
-      <ImageRows images={payload.images} onRemove={onRemoveImage} onUpdate={onUpdateImage} />
+      <ImageRows
+        images={payload.images}
+        onAutofillHex={onAutofillHex}
+        onRemove={onRemoveImage}
+        onUpdate={onUpdateImage}
+      />
       <ColorGroupSummary images={payload.images} />
 
       <label>
@@ -558,6 +588,7 @@ function AccessoryStep({
   fileInputRef,
   limits,
   onAddImages,
+  onAutofillHex,
   onRemoveImage,
   onUpdateImage,
   payload,
@@ -566,6 +597,7 @@ function AccessoryStep({
   fileInputRef: React.MutableRefObject<HTMLInputElement | null>;
   limits: LoaderData["limits"];
   onAddImages: (files: FileList | File[]) => void;
+  onAutofillHex: (id?: string) => void;
   onRemoveImage: (id?: string) => void;
   onUpdateImage: (id: string | undefined, patch: Partial<ColorImageInput>) => void;
   payload: ProductCreatorPayload;
@@ -584,7 +616,12 @@ function AccessoryStep({
         />
       </label>
       <DropZone fileInputRef={fileInputRef} limits={limits} onAddImages={onAddImages} />
-      <ImageRows images={payload.images} onRemove={onRemoveImage} onUpdate={onUpdateImage} />
+      <ImageRows
+        images={payload.images}
+        onAutofillHex={onAutofillHex}
+        onRemove={onRemoveImage}
+        onUpdate={onUpdateImage}
+      />
     </div>
   );
 }
@@ -625,10 +662,12 @@ function DropZone({
 
 function ImageRows({
   images,
+  onAutofillHex,
   onRemove,
   onUpdate,
 }: {
   images: ColorImageInput[];
+  onAutofillHex: (id?: string) => void;
   onRemove: (id?: string) => void;
   onUpdate: (id: string | undefined, patch: Partial<ColorImageInput>) => void;
 }) {
@@ -654,6 +693,28 @@ function ImageRows({
               }
               value={image.variantColorName ?? variantColorNameFromImageTitle(image.colorName)}
             />
+          </label>
+          <label>
+            Colore HEX
+            <div className="hex-field">
+              <span
+                aria-hidden="true"
+                className="hex-swatch"
+                style={{
+                  background: isValidHexColor(image.colorHex) ? normalizeHexColor(image.colorHex) : "#FFFFFF",
+                }}
+              />
+              <input
+                onChange={(event) =>
+                  onUpdate(image.id, { colorHex: normalizeHexColor(event.currentTarget.value) })
+                }
+                placeholder="#A36B43"
+                value={image.colorHex ?? ""}
+              />
+              <button onClick={() => onAutofillHex(image.id)} type="button">
+                Auto
+              </button>
+            </div>
           </label>
           <label>
             SKU colore
@@ -688,8 +749,16 @@ function ColorGroupSummary({ images }: { images: ColorImageInput[] }) {
       <h3>Colori variante</h3>
       {groups.map((group) => (
         <div className="color-group" key={group.name}>
+          <span
+            aria-hidden="true"
+            className="hex-swatch hex-swatch--small"
+            style={{
+              background: isValidHexColor(group.cover.colorHex) ? normalizeHexColor(group.cover.colorHex) : "#FFFFFF",
+            }}
+          />
           <strong>{group.name}</strong>
           <span>{group.images.length} immagini</span>
+          <span>{group.cover.colorHex || "HEX non rilevato"}</span>
           <span>Copertina: {group.cover.colorName}</span>
         </div>
       ))}
@@ -760,6 +829,12 @@ function Review({
         <dd>{payload.brand || "-"}</dd>
         <dt>Colori</dt>
         <dd>{groupImagesByVariantColor(payload.images).map((group) => group.name).join(", ") || "-"}</dd>
+        <dt>HEX colori</dt>
+        <dd>
+          {groupImagesByVariantColor(payload.images)
+            .map((group) => `${group.name}: ${group.cover.colorHex || "n/d"}`)
+            .join(", ") || "-"}
+        </dd>
         <dt>Altezze</dt>
         <dd>{payload.heights.map((height) => height.label).join(", ") || "-"}</dd>
         <dt>Varianti</dt>
@@ -779,6 +854,7 @@ function Review({
           <thead>
             <tr>
               <th>Colore</th>
+              <th>HEX</th>
               <th>Altezza</th>
               <th>SKU</th>
             </tr>
@@ -787,6 +863,7 @@ function Review({
             {variants.map((variant) => (
               <tr key={`${variant.colorName}-${variant.heightLabel}`}>
                 <td>{variant.colorName}</td>
+                <td>{variant.colorHex || "-"}</td>
                 <td>{variant.heightLabel}</td>
                 <td>{variant.sku || "-"}</td>
               </tr>
@@ -828,6 +905,160 @@ async function readFileAsDataUrl(file: File) {
     reader.onload = () => resolve(String(reader.result));
     reader.readAsDataURL(file);
   });
+}
+
+async function inferSuggestedHexColor(dataUrl: string, colorName: string) {
+  const imageHex = await dominantHexFromImage(dataUrl);
+  const nameHex = suggestedHexFromColorName(colorName);
+
+  if (imageHex && nameHex) {
+    return mixHexColors(imageHex, nameHex, 0.28);
+  }
+
+  return imageHex || nameHex || "";
+}
+
+async function dominantHexFromImage(dataUrl: string) {
+  if (typeof document === "undefined") return "";
+
+  const image = await loadImage(dataUrl);
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) return "";
+
+  const width = Math.max(1, Math.min(48, image.naturalWidth || image.width || 48));
+  const height = Math.max(1, Math.min(48, image.naturalHeight || image.height || 48));
+  canvas.width = width;
+  canvas.height = height;
+  context.drawImage(image, 0, 0, width, height);
+
+  const { data } = context.getImageData(0, 0, width, height);
+  const dominant = weightedColorFromPixels(data, width, height);
+  return dominant ? rgbToHex(dominant.r, dominant.g, dominant.b) : "";
+}
+
+function loadImage(src: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("Impossibile leggere l'immagine per stimare il colore."));
+    image.src = src;
+  });
+}
+
+function weightedColorFromPixels(data: Uint8ClampedArray, width: number, height: number) {
+  let weightedRed = 0;
+  let weightedGreen = 0;
+  let weightedBlue = 0;
+  let totalWeight = 0;
+  let fallbackRed = 0;
+  let fallbackGreen = 0;
+  let fallbackBlue = 0;
+  let fallbackWeight = 0;
+
+  for (let index = 0; index < data.length; index += 4) {
+    const red = data[index] ?? 0;
+    const green = data[index + 1] ?? 0;
+    const blue = data[index + 2] ?? 0;
+    const alpha = data[index + 3] ?? 0;
+    if (alpha < 32) continue;
+
+    const pixelIndex = index / 4;
+    const x = pixelIndex % width;
+    const y = Math.floor(pixelIndex / width);
+    const centerBias = centerWeight(x, y, width, height);
+    const { saturation, lightness } = rgbToHsl(red, green, blue);
+    const chromaWeight = saturation > 0.08 ? saturation * 1.4 + 0.2 : 0;
+    const lightnessWeight = 1 - Math.min(Math.abs(lightness - 0.52), 0.52);
+    const weight = centerBias * (chromaWeight + lightnessWeight * 0.35);
+
+    fallbackRed += red * centerBias;
+    fallbackGreen += green * centerBias;
+    fallbackBlue += blue * centerBias;
+    fallbackWeight += centerBias;
+
+    if (weight <= 0.12) continue;
+
+    weightedRed += red * weight;
+    weightedGreen += green * weight;
+    weightedBlue += blue * weight;
+    totalWeight += weight;
+  }
+
+  if (totalWeight > 0) {
+    return {
+      r: Math.round(weightedRed / totalWeight),
+      g: Math.round(weightedGreen / totalWeight),
+      b: Math.round(weightedBlue / totalWeight),
+    };
+  }
+
+  if (fallbackWeight > 0) {
+    return {
+      r: Math.round(fallbackRed / fallbackWeight),
+      g: Math.round(fallbackGreen / fallbackWeight),
+      b: Math.round(fallbackBlue / fallbackWeight),
+    };
+  }
+
+  return null;
+}
+
+function centerWeight(x: number, y: number, width: number, height: number) {
+  const normalizedX = width <= 1 ? 0 : x / (width - 1);
+  const normalizedY = height <= 1 ? 0 : y / (height - 1);
+  const distanceX = Math.abs(normalizedX - 0.5);
+  const distanceY = Math.abs(normalizedY - 0.5);
+  return Math.max(0.35, 1 - (distanceX + distanceY) * 0.85);
+}
+
+function rgbToHsl(red: number, green: number, blue: number) {
+  const r = red / 255;
+  const g = green / 255;
+  const b = blue / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const lightness = (max + min) / 2;
+  const delta = max - min;
+
+  if (delta === 0) {
+    return { saturation: 0, lightness };
+  }
+
+  const saturation =
+    lightness > 0.5 ? delta / (2 - max - min) : delta / (max + min);
+
+  return { saturation, lightness };
+}
+
+function rgbToHex(red: number, green: number, blue: number) {
+  const toHex = (value: number) => Math.max(0, Math.min(255, value)).toString(16).padStart(2, "0");
+  return `#${toHex(red)}${toHex(green)}${toHex(blue)}`.toUpperCase();
+}
+
+function mixHexColors(primaryHex: string, secondaryHex: string, secondaryRatio = 0.3) {
+  const primary = hexToRgb(primaryHex);
+  const secondary = hexToRgb(secondaryHex);
+  if (!primary) return normalizeHexColor(secondaryHex);
+  if (!secondary) return normalizeHexColor(primaryHex);
+
+  const ratio = Math.max(0, Math.min(1, secondaryRatio));
+  return rgbToHex(
+    Math.round(primary.r * (1 - ratio) + secondary.r * ratio),
+    Math.round(primary.g * (1 - ratio) + secondary.g * ratio),
+    Math.round(primary.b * (1 - ratio) + secondary.b * ratio),
+  );
+}
+
+function hexToRgb(hex: string) {
+  const normalized = normalizeHexColor(hex);
+  if (!isValidHexColor(normalized)) return null;
+
+  return {
+    r: Number.parseInt(normalized.slice(1, 3), 16),
+    g: Number.parseInt(normalized.slice(3, 5), 16),
+    b: Number.parseInt(normalized.slice(5, 7), 16),
+  };
 }
 
 async function postJson<T>(url: string, body: unknown, sessionToken?: string): Promise<T> {
@@ -1026,9 +1257,12 @@ const styles = `
   button.primary { background: #008060; border-color: #008060; color: #fff; }
   button:disabled { opacity: 0.45; cursor: not-allowed; }
   .image-list { display: grid; gap: 12px; }
-  .image-row { display: grid; grid-template-columns: 84px minmax(150px, 1fr) minmax(150px, 1fr) 160px 140px auto; gap: 12px; align-items: end; padding: 12px; border: 1px solid #e1e5ea; border-radius: 8px; }
+  .image-row { display: grid; grid-template-columns: 84px minmax(150px, 1fr) minmax(150px, 1fr) minmax(170px, 1fr) 160px 140px auto; gap: 12px; align-items: end; padding: 12px; border: 1px solid #e1e5ea; border-radius: 8px; }
   .image-row img, .image-row > div:first-child { width: 84px; height: 84px; object-fit: cover; border-radius: 6px; background: #eef1f4; }
   .image-cover { align-self: center; padding-bottom: 9px; }
+  .hex-field { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+  .hex-swatch { width: 20px; height: 20px; border-radius: 6px; border: 1px solid #c9ced6; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25); }
+  .hex-swatch--small { width: 18px; height: 18px; border-radius: 5px; }
   .color-groups { border: 1px solid #e1e5ea; border-radius: 8px; padding: 12px; display: grid; gap: 8px; }
   .color-groups h3 { margin: 0; font-size: 15px; }
   .color-group { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; color: #3f4750; }
