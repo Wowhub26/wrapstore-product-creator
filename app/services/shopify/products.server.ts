@@ -1,4 +1,6 @@
 import {
+  generateAccessoryOptionDefinitions,
+  generateAccessoryVariantsFromOptions,
   generateFilmVariants,
   groupImagesByVariantColor,
   productCreatorPayloadSchema,
@@ -166,10 +168,11 @@ export async function createGuidedProduct(
     productId = createdProduct.id;
 
     await runPostCreateStep(failures, "Creazione varianti", async () => {
+      const mediaByAlt = new Map(
+        createdProduct.media.map((media) => [media.alt?.toLowerCase(), media.id]),
+      );
+
       if (payload.category === "Pellicole") {
-        const mediaByAlt = new Map(
-          createdProduct.media.map((media) => [media.alt?.toLowerCase(), media.id]),
-        );
         const variants = generateFilmVariants(payload.images, payload.heights).map(
           (variant) => ({
             optionValues: variant.optionValues,
@@ -179,6 +182,20 @@ export async function createGuidedProduct(
               : {}),
           }),
         );
+
+        await createVariants(admin, productId!, variants);
+      } else if (payload.accessoryOptions.length) {
+        const variants = generateAccessoryVariantsFromOptions(
+          payload.accessoryOptions,
+          payload.images,
+          payload.accessorySku,
+        ).map((variant) => ({
+          optionValues: variant.optionValues,
+          ...(variant.sku ? { inventoryItem: { sku: variant.sku } } : {}),
+          ...(variant.mediaAlt
+            ? { mediaId: mediaByAlt.get(variant.mediaAlt.toLowerCase()) }
+            : {}),
+        }));
 
         await createVariants(admin, productId!, variants);
       } else if (payload.accessorySku?.trim() && createdProduct.defaultVariantId) {
@@ -295,6 +312,13 @@ async function createProduct(
             values: payload.heights.map((height) => ({ name: height.label })),
           },
         ]
+      : payload.accessoryOptions.length
+        ? generateAccessoryOptionDefinitions(payload.accessoryOptions, payload.images).map(
+            (option) => ({
+              name: option.name,
+              values: option.values.map((value) => ({ name: value.name })),
+            }),
+          )
       : undefined;
 
   const data = await shopifyGraphql<{

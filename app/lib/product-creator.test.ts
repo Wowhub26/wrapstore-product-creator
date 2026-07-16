@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   findDuplicateVariantSkus,
+  generateAccessoryOptionDefinitions,
+  generateAccessoryVariantsFromOptions,
   generateFilmVariants,
   groupImagesByVariantColor,
   isValidHexColor,
@@ -151,6 +153,48 @@ describe("product creator utilities", () => {
     expect(variants.map((variant) => variant.sku)).toEqual([
       "98814",
       "98814",
+    ]);
+  });
+
+  it("generates accessory variants from color and size options", () => {
+    const variants = generateAccessoryVariantsFromOptions(
+      [
+        { name: "Colore", type: "color", values: [] },
+        { name: "Taglia", type: "custom", values: ["S", "M"] },
+      ],
+      [
+        { fileName: "black.jpg", colorName: "Black Disco", colorHex: "#292017", colorSku: "BK1", isColorCover: true },
+        { fileName: "gold.jpg", colorName: "Gold Disco", colorHex: "#C99A1A", colorSku: "GD1", isColorCover: true },
+      ],
+      "ACC-BASE",
+    );
+
+    expect(variants).toHaveLength(4);
+    expect(variants[0]?.optionValues).toEqual([
+      { optionName: "Colore", name: "Black Disco" },
+      { optionName: "Taglia", name: "S" },
+    ]);
+    expect(variants.map((variant) => variant.colorHex)).toEqual([
+      "#292017",
+      "#292017",
+      "#C99A1A",
+      "#C99A1A",
+    ]);
+    expect(variants.map((variant) => variant.sku)).toEqual(["BK1", "BK1", "GD1", "GD1"]);
+  });
+
+  it("builds accessory option definitions for Shopify product options", () => {
+    expect(
+      generateAccessoryOptionDefinitions(
+        [
+          { name: "Colore", type: "color", values: [] },
+          { name: "Taglia", type: "custom", values: ["XS", "S", "M"] },
+        ],
+        [{ fileName: "black.jpg", colorName: "Black Disco", colorHex: "#292017", isColorCover: true }],
+      ),
+    ).toMatchObject([
+      { name: "Colore", values: [{ name: "Black Disco", colorHex: "#292017" }] },
+      { name: "Taglia", values: [{ name: "XS" }, { name: "S" }, { name: "M" }] },
     ]);
   });
 

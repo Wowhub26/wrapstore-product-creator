@@ -9,6 +9,8 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import {
   ACCEPTED_IMAGE_TYPES,
+  generateAccessoryOptionDefinitions,
+  generateAccessoryVariantsFromOptions,
   generateFilmVariants,
   groupImagesByVariantColor,
   isValidHexColor,
@@ -17,7 +19,9 @@ import {
   suggestedHexFromColorName,
   variantColorNameFromImageTitle,
   productCreatorPayloadSchema,
+  type AccessoryOptionInput,
   type ColorImageInput,
+  type GeneratedVariant,
   type HeightInput,
   type ProductCreatorPayload,
   type ProductSpecInput,
@@ -80,6 +84,7 @@ const EMPTY_PAYLOAD: ProductCreatorPayload = {
   pdf: null,
   specs: SPEC_FIELDS,
   accessorySku: "",
+  accessoryOptions: [],
 };
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -133,8 +138,12 @@ export default function NewProductWizard() {
     () =>
       payload.category === "Pellicole"
         ? generateFilmVariants(payload.images, payload.heights)
-        : [],
-    [payload.category, payload.images, payload.heights],
+        : generateAccessoryVariantsFromOptions(
+            payload.accessoryOptions,
+            payload.images,
+            payload.accessorySku,
+          ),
+    [payload.accessoryOptions, payload.accessorySku, payload.category, payload.heights, payload.images],
   );
 
   const setField = <TKey extends keyof ProductCreatorPayload>(
@@ -603,11 +612,14 @@ function AccessoryStep({
   payload: ProductCreatorPayload;
   setPayload: React.Dispatch<React.SetStateAction<ProductCreatorPayload>>;
 }) {
+  const colorOption = payload.accessoryOptions.find((option) => option.type === "color");
+  const customOptions = payload.accessoryOptions.filter((option) => option.type === "custom");
+
   return (
     <div className="stack">
       <h2>Accessori</h2>
       <label>
-        SKU opzionale
+        SKU base opzionale
         <input
           onChange={(event) =>
             setPayload((current) => ({ ...current, accessorySku: event.currentTarget.value }))
@@ -615,13 +627,189 @@ function AccessoryStep({
           value={payload.accessorySku ?? ""}
         />
       </label>
-      <DropZone fileInputRef={fileInputRef} limits={limits} onAddImages={onAddImages} />
-      <ImageRows
-        images={payload.images}
-        onAutofillHex={onAutofillHex}
-        onRemove={onRemoveImage}
-        onUpdate={onUpdateImage}
-      />
+
+      <div className="variant-builder">
+        <div className="variant-builder__header">
+          <div>
+            <h3>Varianti accessorio</h3>
+            <p className="muted">
+              Puoi combinare Colore, Taglia o qualsiasi altra variante personalizzata.
+            </p>
+          </div>
+          <div className="variant-builder__actions">
+            {!colorOption ? (
+              <button
+                onClick={() =>
+                  setPayload((current) => ({
+                    ...current,
+                    accessoryOptions: [...current.accessoryOptions, createAccessoryOption("color")],
+                  }))
+                }
+                type="button"
+              >
+                Aggiungi colore
+              </button>
+            ) : null}
+            <button
+              onClick={() =>
+                setPayload((current) => ({
+                  ...current,
+                  accessoryOptions: [...current.accessoryOptions, createAccessoryOption("custom")],
+                }))
+              }
+              type="button"
+            >
+              Aggiungi variante libera
+            </button>
+            <button
+              onClick={() =>
+                setPayload((current) => ({
+                  ...current,
+                  accessoryOptions: [
+                    ...current.accessoryOptions,
+                    createAccessoryOption("custom", "Taglia", ["XS", "S", "M", "L", "XL"]),
+                  ],
+                }))
+              }
+              type="button"
+            >
+              Aggiungi Taglia XS-XL
+            </button>
+          </div>
+        </div>
+
+        {colorOption ? (
+          <div className="variant-card">
+            <div className="variant-card__header">
+              <div>
+                <strong>Variante colore</strong>
+                <p className="muted">
+                  Usa lo stesso configuratore delle pellicole per creare i valori colore.
+                </p>
+              </div>
+              <button
+                onClick={() =>
+                  setPayload((current) => ({
+                    ...current,
+                    accessoryOptions: current.accessoryOptions.filter((option) => option.id !== colorOption.id),
+                    images: [],
+                  }))
+                }
+                type="button"
+              >
+                Rimuovi colore
+              </button>
+            </div>
+            <DropZone fileInputRef={fileInputRef} limits={limits} onAddImages={onAddImages} />
+            <ImageRows
+              images={payload.images}
+              onAutofillHex={onAutofillHex}
+              onRemove={onRemoveImage}
+              onUpdate={onUpdateImage}
+            />
+            <ColorGroupSummary images={payload.images} />
+          </div>
+        ) : null}
+
+        {customOptions.map((option) => (
+          <AccessoryOptionCard
+            key={option.id}
+            onChange={(patch) =>
+              setPayload((current) => ({
+                ...current,
+                accessoryOptions: current.accessoryOptions.map((item) =>
+                  item.id === option.id ? { ...item, ...patch } : item,
+                ),
+              }))
+            }
+            onRemove={() =>
+              setPayload((current) => ({
+                ...current,
+                accessoryOptions: current.accessoryOptions.filter((item) => item.id !== option.id),
+              }))
+            }
+            option={option}
+          />
+        ))}
+
+        {!payload.accessoryOptions.length ? (
+          <p className="empty">
+            Nessuna variante aggiunta. Se lasci cosi, l'accessorio verra creato con una sola variante.
+          </p>
+        ) : null}
+      </div>
+
+      {payload.accessoryOptions.length ? (
+        <AccessoryVariantSummary
+          definitions={generateAccessoryOptionDefinitions(payload.accessoryOptions, payload.images)}
+          variants={generateAccessoryVariantsFromOptions(
+            payload.accessoryOptions,
+            payload.images,
+            payload.accessorySku,
+          )}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function AccessoryOptionCard({
+  onChange,
+  onRemove,
+  option,
+}: {
+  onChange: (patch: Partial<AccessoryOptionInput>) => void;
+  onRemove: () => void;
+  option: AccessoryOptionInput;
+}) {
+  return (
+    <div className="variant-card">
+      <div className="variant-card__header">
+        <strong>Variante personalizzata</strong>
+        <button onClick={onRemove} type="button">
+          Rimuovi
+        </button>
+      </div>
+      <label>
+        Nome variante
+        <input
+          onChange={(event) => onChange({ name: event.currentTarget.value })}
+          placeholder="Es. Taglia, Materiale, Lato"
+          value={option.name}
+        />
+      </label>
+      <label>
+        Valori
+        <input
+          onChange={(event) => onChange({ values: splitOptionValues(event.currentTarget.value) })}
+          placeholder="Es. XS, S, M, L, XL"
+          value={option.values.join(", ")}
+        />
+      </label>
+      <p className="muted">Separali con virgola. Il prodotto generera tutte le combinazioni.</p>
+    </div>
+  );
+}
+
+function AccessoryVariantSummary({
+  definitions,
+  variants,
+}: {
+  definitions: ReturnType<typeof generateAccessoryOptionDefinitions>;
+  variants: GeneratedVariant[];
+}) {
+  return (
+    <div className="color-groups">
+      <h3>Riepilogo varianti accessorio</h3>
+      {definitions.map((definition) => (
+        <div className="color-group" key={definition.name}>
+          <strong>{definition.name}</strong>
+          <span>{definition.values.map((value) => value.name).join(", ")}</span>
+        </div>
+      ))}
+      <span className="muted">
+        Totale combinazioni: {variants.length}
+      </span>
     </div>
   );
 }
@@ -813,8 +1001,13 @@ function Review({
 }: {
   payload: ProductCreatorPayload;
   selectedCollection?: ShopifyCollection;
-  variants: ReturnType<typeof generateFilmVariants>;
+  variants: GeneratedVariant[];
 }) {
+  const accessoryDefinitions = generateAccessoryOptionDefinitions(
+    payload.accessoryOptions,
+    payload.images,
+  );
+
   return (
     <div className="review">
       <h2>Review finale</h2>
@@ -827,6 +1020,18 @@ function Review({
         <dd>{payload.category}</dd>
         <dt>Brand</dt>
         <dd>{payload.brand || "-"}</dd>
+        {payload.category === "Accessori" ? (
+          <>
+            <dt>Varianti accessorio</dt>
+            <dd>
+              {accessoryDefinitions.length
+                ? accessoryDefinitions
+                    .map((definition) => `${definition.name}: ${definition.values.map((value) => value.name).join(", ")}`)
+                    .join(" | ")
+                : "-"}
+            </dd>
+          </>
+        ) : null}
         <dt>Colori</dt>
         <dd>{groupImagesByVariantColor(payload.images).map((group) => group.name).join(", ") || "-"}</dd>
         <dt>HEX colori</dt>
@@ -836,7 +1041,7 @@ function Review({
             .join(", ") || "-"}
         </dd>
         <dt>Altezze</dt>
-        <dd>{payload.heights.map((height) => height.label).join(", ") || "-"}</dd>
+        <dd>{payload.category === "Pellicole" ? payload.heights.map((height) => height.label).join(", ") || "-" : "-"}</dd>
         <dt>Varianti</dt>
         <dd>{variants.length ? `${variants.length} varianti` : "Nessuna variante dedicata"}</dd>
         <dt>PDF</dt>
@@ -853,18 +1058,22 @@ function Review({
         <table>
           <thead>
             <tr>
+              <th>Combinazione</th>
               <th>Colore</th>
               <th>HEX</th>
-              <th>Altezza</th>
               <th>SKU</th>
             </tr>
           </thead>
           <tbody>
-            {variants.map((variant) => (
-              <tr key={`${variant.colorName}-${variant.heightLabel}`}>
+            {variants.map((variant, index) => (
+              <tr key={`${variant.optionValues.map((option) => `${option.optionName}:${option.name}`).join("|") || "default"}-${index}`}>
+                <td>
+                  {variant.optionValues.length
+                    ? variant.optionValues.map((option) => `${option.optionName}: ${option.name}`).join(" / ")
+                    : "Variante base"}
+                </td>
                 <td>{variant.colorName}</td>
                 <td>{variant.colorHex || "-"}</td>
-                <td>{variant.heightLabel}</td>
                 <td>{variant.sku || "-"}</td>
               </tr>
             ))}
@@ -882,6 +1091,26 @@ function mergeSpecs(specs?: ProductSpecInput[]) {
   }));
 }
 
+function createAccessoryOption(
+  type: AccessoryOptionInput["type"],
+  name?: string,
+  values: string[] = [],
+): AccessoryOptionInput {
+  return {
+    id: crypto.randomUUID(),
+    name: name ?? (type === "color" ? "Colore" : ""),
+    type,
+    values,
+  };
+}
+
+function splitOptionValues(value: string) {
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 function validateStep(step: number, payload: ProductCreatorPayload) {
   return stepErrors(step, payload).length === 0;
 }
@@ -893,6 +1122,19 @@ function stepErrors(step: number, payload: ProductCreatorPayload) {
     const errors: string[] = [];
     if (!payload.images.length) errors.push("Carica almeno una immagine.");
     if (!payload.heights.length) errors.push("Seleziona almeno una altezza.");
+    return errors;
+  }
+  if (step === 2 && payload.category === "Accessori") {
+    const errors: string[] = [];
+    payload.accessoryOptions.forEach((option) => {
+      if (!option.name.trim()) errors.push("Ogni variante accessorio deve avere un nome.");
+      if (option.type === "color" && !payload.images.length) {
+        errors.push('Se attivi la variante "Colore", carica almeno una immagine.');
+      }
+      if (option.type === "custom" && !option.values.some((value) => value.trim())) {
+        errors.push(`Inserisci almeno un valore per la variante "${option.name || "senza nome"}".`);
+      }
+    });
     return errors;
   }
   return [];
@@ -1263,6 +1505,10 @@ const styles = `
   .hex-field { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; gap: 8px; align-items: center; }
   .hex-swatch { width: 20px; height: 20px; border-radius: 6px; border: 1px solid #c9ced6; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25); }
   .hex-swatch--small { width: 18px; height: 18px; border-radius: 5px; }
+  .variant-builder { display: grid; gap: 12px; }
+  .variant-builder__header, .variant-card__header { display: flex; gap: 12px; justify-content: space-between; align-items: start; }
+  .variant-builder__actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+  .variant-card { border: 1px solid #e1e5ea; border-radius: 8px; padding: 14px; display: grid; gap: 12px; background: #fbfcfc; }
   .color-groups { border: 1px solid #e1e5ea; border-radius: 8px; padding: 12px; display: grid; gap: 8px; }
   .color-groups h3 { margin: 0; font-size: 15px; }
   .color-group { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; color: #3f4750; }
@@ -1281,7 +1527,8 @@ const styles = `
     .grid--two, .image-row { grid-template-columns: 1fr; }
     .image-row img, .image-row > div:first-child { width: 100%; height: auto; aspect-ratio: 4 / 3; }
     .review dl { grid-template-columns: 1fr; }
-    .dropzone, .upload-row { align-items: stretch; flex-direction: column; }
+    .dropzone, .upload-row, .variant-builder__header, .variant-card__header { align-items: stretch; flex-direction: column; }
+    .variant-builder__actions { justify-content: stretch; }
   }
 `;
 

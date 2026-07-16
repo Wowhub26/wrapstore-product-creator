@@ -33,6 +33,15 @@ export type ProductSpecInput = {
   value?: string;
 };
 
+export type AccessoryOptionType = "color" | "custom";
+
+export type AccessoryOptionInput = {
+  id: string;
+  name: string;
+  type: AccessoryOptionType;
+  values: string[];
+};
+
 export type ProductCreatorPayload = {
   draftId?: string;
   collectionId: string;
@@ -52,6 +61,7 @@ export type ProductCreatorPayload = {
   } | null;
   specs: ProductSpecInput[];
   accessorySku?: string;
+  accessoryOptions: AccessoryOptionInput[];
 };
 
 export type GeneratedVariant = {
@@ -69,6 +79,20 @@ export type ProductSpecsMapping = {
   titleField: string;
   valueField: string;
   skuField?: string;
+};
+
+export type AccessoryOptionValueDefinition = {
+  name: string;
+  colorHex?: string;
+  mediaFileName?: string;
+  mediaAlt?: string;
+  sku?: string;
+};
+
+export type AccessoryOptionDefinition = {
+  name: string;
+  type: AccessoryOptionType;
+  values: AccessoryOptionValueDefinition[];
 };
 
 const nonEmptyString = z.string().trim().min(1);
@@ -107,6 +131,13 @@ export const productSpecSchema = z.object({
   value: z.string().trim().optional(),
 });
 
+export const accessoryOptionSchema = z.object({
+  id: nonEmptyString,
+  name: nonEmptyString,
+  type: z.enum(["color", "custom"]),
+  values: z.array(nonEmptyString),
+});
+
 export const productCreatorPayloadSchema = z
   .object({
     draftId: z.string().optional(),
@@ -130,6 +161,7 @@ export const productCreatorPayloadSchema = z
       .optional(),
     specs: z.array(productSpecSchema),
     accessorySku: z.string().trim().optional(),
+    accessoryOptions: z.array(accessoryOptionSchema).default([]),
   })
   .superRefine((payload, context) => {
     const duplicateImageTitles = findDuplicateValues(
@@ -159,6 +191,47 @@ export const productCreatorPayloadSchema = z
         });
       }
 
+    }
+
+    if (payload.category === "Accessori") {
+      const duplicateOptionNames = findDuplicateValues(
+        payload.accessoryOptions.map((option) => option.name),
+      );
+      duplicateOptionNames.forEach((name) => {
+        context.addIssue({
+          code: "custom",
+          path: ["accessoryOptions"],
+          message: `Nome variante duplicato: ${name}.`,
+        });
+      });
+
+      payload.accessoryOptions.forEach((option, optionIndex) => {
+        const cleanedValues = option.values.map((value) => value.trim()).filter(Boolean);
+        if (!cleanedValues.length) {
+          context.addIssue({
+            code: "custom",
+            path: ["accessoryOptions", optionIndex, "values"],
+            message: `La variante "${option.name}" deve avere almeno un valore.`,
+          });
+        }
+
+        const duplicateValues = findDuplicateValues(cleanedValues);
+        duplicateValues.forEach((value) => {
+          context.addIssue({
+            code: "custom",
+            path: ["accessoryOptions", optionIndex, "values"],
+            message: `Valore duplicato nella variante "${option.name}": ${value}.`,
+          });
+        });
+
+        if (option.type === "color" && !payload.images.length) {
+          context.addIssue({
+            code: "custom",
+            path: ["images"],
+            message: 'Aggiungi almeno una immagine se vuoi usare la variante "Colore".',
+          });
+        }
+      });
     }
   });
 
@@ -307,6 +380,62 @@ export function generateAccessoryVariants(accessorySku?: string): GeneratedVaria
       optionValues: [],
     },
   ];
+}
+
+export function accessoryOptionValues(
+  option: Pick<AccessoryOptionInput, "name" | "type" | "values">,
+  images: Pick<ColorImageInput, "colorName" | "variantColorName" | "colorHex" | "colorSku" | "fileName" | "isColorCover">[],
+): AccessoryOptionValueDefinition[] {
+  if (option.type === "color") {
+    return groupImagesByVariantColor(images).map((group) => ({
+      name: group.name,
+      colorHex: group.cover.colorHex,
+      mediaFileName: group.cover.fileName,
+      mediaAlt: group.cover.colorName,
+      sku: group.cover.colorSku?.trim() || "",
+    }));
+  }
+
+  return option.values.map((value) => ({
+    name: value.trim(),
+  }));
+}
+
+export function generateAccessoryOptionDefinitions(
+  options: Pick<AccessoryOptionInput, "name" | "type" | "values">[],
+  images: Pick<ColorImageInput, "colorName" | "variantColorName" | "colorHex" | "colorSku" | "fileName" | "isColorCover">[],
+): AccessoryOptionDefinition[] {
+  return options
+    .map((option) => ({
+      name: option.name.trim(),
+      type: option.type,
+      values: accessoryOptionValues(option, images),
+    }))
+    .filter((option) => option.name && option.values.length);
+}
+
+export function generateAccessoryVariantsFromOptions(
+  options: Pick<AccessoryOptionInput, "name" | "type" | "values">[],
+  images: Pick<ColorImageInput, "colorName" | "variantColorName" | "colorHex" | "colorSku" | "fileName" | "isColorCover">[],
+  accessorySku?: string,
+): GeneratedVariant[] {
+  const definitions = generateAccessoryOptionDefinitions(options, images);
+  if (!definitions.length) return generateAccessoryVariants(accessorySku);
+
+  return definitions.reduce<GeneratedVariant[]>(
+    (variants, option) =>
+      variants.flatMap((variant) =>
+        option.values.map((value) => ({
+          colorName: value.mediaAlt ? value.name : variant.colorName,
+          colorHex: value.colorHex || variant.colorHex,
+          sku: variant.sku || value.sku || accessorySku?.trim() || "",
+          mediaFileName: value.mediaFileName || variant.mediaFileName,
+          mediaAlt: value.mediaAlt || variant.mediaAlt,
+          optionValues: [...variant.optionValues, { optionName: option.name, name: value.name }],
+        })),
+      ),
+    [{ sku: "", optionValues: [] }],
+  );
 }
 
 export function findDuplicateValues(values: string[]) {
