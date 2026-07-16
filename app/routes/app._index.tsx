@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   HeadersFunction,
   LoaderFunctionArgs,
@@ -776,6 +776,12 @@ function AccessoryOptionCard({
   onRemove: () => void;
   option: AccessoryOptionInput;
 }) {
+  const [valuesText, setValuesText] = useState(option.values.join(", "));
+
+  useEffect(() => {
+    setValuesText(option.values.join(", "));
+  }, [option.values]);
+
   return (
     <div className="variant-card">
       <div className="variant-card__header">
@@ -795,9 +801,13 @@ function AccessoryOptionCard({
       <label>
         Valori
         <input
-          onChange={(event) => onChange({ values: splitOptionValues(event.currentTarget.value) })}
+          onChange={(event) => {
+            const nextValue = event.currentTarget.value;
+            setValuesText(nextValue);
+            onChange({ values: splitOptionValues(nextValue) });
+          }}
           placeholder="Es. XS, S, M, L, XL"
-          value={option.values.join(", ")}
+          value={valuesText}
         />
       </label>
       <p className="muted">Separali con virgola. Il prodotto generera tutte le combinazioni.</p>
