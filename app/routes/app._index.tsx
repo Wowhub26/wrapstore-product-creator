@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type {
   HeadersFunction,
   LoaderFunctionArgs,
@@ -776,12 +776,6 @@ function AccessoryOptionCard({
   onRemove: () => void;
   option: AccessoryOptionInput;
 }) {
-  const [valuesText, setValuesText] = useState(option.values.join(", "));
-
-  useEffect(() => {
-    setValuesText(option.values.join(", "));
-  }, [option.values]);
-
   return (
     <div className="variant-card">
       <div className="variant-card__header">
@@ -798,19 +792,45 @@ function AccessoryOptionCard({
           value={option.name}
         />
       </label>
-      <label>
-        Valori
-        <input
-          onChange={(event) => {
-            const nextValue = event.currentTarget.value;
-            setValuesText(nextValue);
-            onChange({ values: splitOptionValues(nextValue) });
-          }}
-          placeholder="Es. XS, S, M, L, XL"
-          value={valuesText}
-        />
-      </label>
-      <p className="muted">Separali con virgola. Il prodotto generera tutte le combinazioni.</p>
+      <div className="stack stack--tight">
+        <label>Valori</label>
+        {option.values.map((value, index) => (
+          <div className="option-value-row" key={`${option.id}-${index}`}>
+            <input
+              onChange={(event) =>
+                onChange({
+                  values: option.values.map((item, itemIndex) =>
+                    itemIndex === index ? event.currentTarget.value : item,
+                  ),
+                })
+              }
+              placeholder={`Opzione ${index + 1}`}
+              value={value}
+            />
+            <button
+              onClick={() =>
+                onChange({
+                  values: option.values.filter((_, itemIndex) => itemIndex !== index),
+                })
+              }
+              type="button"
+            >
+              Rimuovi opzione
+            </button>
+          </div>
+        ))}
+        <button
+          onClick={() =>
+            onChange({
+              values: [...option.values, ""],
+            })
+          }
+          type="button"
+        >
+          Aggiungi opzione
+        </button>
+      </div>
+      <p className="muted">Il prodotto generera tutte le combinazioni dei valori inseriti.</p>
     </div>
   );
 }
@@ -1136,13 +1156,6 @@ function createAccessoryOption(
     type,
     values,
   };
-}
-
-function splitOptionValues(value: string) {
-  return value
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
 }
 
 function validateStep(step: number, payload: ProductCreatorPayload) {
@@ -1543,6 +1556,8 @@ const styles = `
   .variant-builder__header, .variant-card__header { display: flex; gap: 12px; justify-content: space-between; align-items: start; }
   .variant-builder__actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
   .variant-card { border: 1px solid #e1e5ea; border-radius: 8px; padding: 14px; display: grid; gap: 12px; background: #fbfcfc; }
+  .stack--tight { gap: 10px; }
+  .option-value-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; }
   .color-groups { border: 1px solid #e1e5ea; border-radius: 8px; padding: 12px; display: grid; gap: 8px; }
   .color-groups h3 { margin: 0; font-size: 15px; }
   .color-group { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; color: #3f4750; }
@@ -1561,7 +1576,7 @@ const styles = `
     .grid--two, .image-row { grid-template-columns: 1fr; }
     .image-row img, .image-row > div:first-child { width: 100%; height: auto; aspect-ratio: 4 / 3; }
     .review dl { grid-template-columns: 1fr; }
-    .dropzone, .upload-row, .variant-builder__header, .variant-card__header { align-items: stretch; flex-direction: column; }
+    .dropzone, .upload-row, .variant-builder__header, .variant-card__header, .option-value-row { align-items: stretch; flex-direction: column; }
     .variant-builder__actions { justify-content: stretch; }
   }
 `;
