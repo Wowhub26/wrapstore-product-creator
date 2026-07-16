@@ -616,19 +616,21 @@ function AccessoryStep({
   const customOptions = payload.accessoryOptions.filter((option) => option.type === "custom");
 
   return (
-    <div className="stack">
+    <div className="stack accessory-layout">
       <h2>Accessori</h2>
-      <label>
-        SKU base opzionale
-        <input
-          onChange={(event) =>
-            setPayload((current) => ({ ...current, accessorySku: event.currentTarget.value }))
-          }
-          value={payload.accessorySku ?? ""}
-        />
-      </label>
+      <div className="variant-card variant-card--soft">
+        <label>
+          SKU base opzionale
+          <input
+            onChange={(event) =>
+              setPayload((current) => ({ ...current, accessorySku: event.currentTarget.value }))
+            }
+            value={payload.accessorySku ?? ""}
+          />
+        </label>
+      </div>
 
-      <div className="variant-card">
+      <div className="variant-card variant-card--section">
         <div className="variant-card__header">
           <div>
             <strong>Immagini prodotto</strong>
@@ -648,7 +650,7 @@ function AccessoryStep({
         {colorOption ? <ColorGroupSummary images={payload.images} /> : null}
       </div>
 
-      <div className="variant-builder">
+      <div className="variant-builder variant-card variant-card--section">
         <div className="variant-builder__header">
           <div>
             <h3>Varianti accessorio</h3>
@@ -659,6 +661,7 @@ function AccessoryStep({
           <div className="variant-builder__actions">
             {!colorOption ? (
               <button
+                className="button-secondary"
                 onClick={() =>
                   setPayload((current) => ({
                     ...current,
@@ -671,6 +674,7 @@ function AccessoryStep({
               </button>
             ) : null}
             <button
+              className="button-secondary"
               onClick={() =>
                 setPayload((current) => ({
                   ...current,
@@ -682,6 +686,7 @@ function AccessoryStep({
               Aggiungi variante libera
             </button>
             <button
+              className="button-secondary"
               onClick={() =>
                 setPayload((current) => ({
                   ...current,
@@ -699,7 +704,7 @@ function AccessoryStep({
         </div>
 
         {colorOption ? (
-          <div className="variant-card">
+          <div className="variant-card variant-card--nested">
             <div className="variant-card__header">
               <div>
                 <strong>Variante colore</strong>
@@ -708,6 +713,7 @@ function AccessoryStep({
                 </p>
               </div>
               <button
+                className="button-ghost"
                 onClick={() =>
                   setPayload((current) => ({
                     ...current,
@@ -780,7 +786,7 @@ function AccessoryOptionCard({
     <div className="variant-card">
       <div className="variant-card__header">
         <strong>Variante personalizzata</strong>
-        <button onClick={onRemove} type="button">
+        <button className="button-ghost" onClick={onRemove} type="button">
           Rimuovi
         </button>
       </div>
@@ -808,6 +814,7 @@ function AccessoryOptionCard({
               value={value}
             />
             <button
+              className="button-ghost"
               onClick={() =>
                 onChange({
                   values: option.values.filter((_, itemIndex) => itemIndex !== index),
@@ -820,6 +827,7 @@ function AccessoryOptionCard({
           </div>
         ))}
         <button
+          className="button-secondary"
           onClick={() =>
             onChange({
               values: [...option.values, ""],
@@ -1525,7 +1533,9 @@ const styles = `
   .steps button span { width: 24px; height: 24px; border-radius: 50%; display: inline-grid; place-items: center; background: #eef1f4; }
   .steps button.is-active { border-color: #008060; color: #005e46; background: #f0f8f5; }
   .panel { background: #fff; border: 1px solid #dfe3e8; border-radius: 8px; padding: 20px; min-height: 430px; }
+  .panel, .variant-card, .image-row, .color-groups, .dropzone { overflow: hidden; }
   .stack { display: grid; gap: 16px; }
+  .accessory-layout { gap: 18px; }
   .grid { display: grid; gap: 16px; }
   .grid--two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   label { display: grid; gap: 6px; font-size: 13px; font-weight: 650; color: #3f4750; }
@@ -1544,18 +1554,24 @@ const styles = `
   .dropzone { border: 1px dashed #9aa4b2; border-radius: 8px; padding: 22px; display: flex; gap: 12px; align-items: center; background: #fafbfb; }
   button { border: 1px solid #c9ced6; background: #fff; padding: 10px 14px; border-radius: 6px; font-weight: 700; cursor: pointer; }
   button.primary { background: #008060; border-color: #008060; color: #fff; }
+  .button-secondary { background: #f7f8f9; border-color: #d5d9de; color: #26313c; }
+  .button-ghost { background: transparent; border-color: #d5d9de; color: #52606d; }
   button:disabled { opacity: 0.45; cursor: not-allowed; }
   .image-list { display: grid; gap: 12px; }
-  .image-row { display: grid; grid-template-columns: 84px minmax(150px, 1fr) minmax(150px, 1fr) minmax(170px, 1fr) 160px 140px auto; gap: 12px; align-items: end; padding: 12px; border: 1px solid #e1e5ea; border-radius: 8px; }
+  .image-row { display: grid; grid-template-columns: 84px minmax(0, 1.1fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 0.9fr) 140px auto; gap: 12px; align-items: end; padding: 12px; border: 1px solid #e1e5ea; border-radius: 8px; background: #fff; }
   .image-row img, .image-row > div:first-child { width: 84px; height: 84px; object-fit: cover; border-radius: 6px; background: #eef1f4; }
+  .image-row__meta { align-self: center; min-width: 0; word-break: break-word; }
   .image-cover { align-self: center; padding-bottom: 9px; }
   .hex-field { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; gap: 8px; align-items: center; }
   .hex-swatch { width: 20px; height: 20px; border-radius: 6px; border: 1px solid #c9ced6; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25); }
   .hex-swatch--small { width: 18px; height: 18px; border-radius: 5px; }
-  .variant-builder { display: grid; gap: 12px; }
+  .variant-builder { display: grid; gap: 14px; padding: 16px; }
   .variant-builder__header, .variant-card__header { display: flex; gap: 12px; justify-content: space-between; align-items: start; }
   .variant-builder__actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
-  .variant-card { border: 1px solid #e1e5ea; border-radius: 8px; padding: 14px; display: grid; gap: 12px; background: #fbfcfc; }
+  .variant-card { border: 1px solid #e1e5ea; border-radius: 10px; padding: 14px; display: grid; gap: 12px; background: #fbfcfc; min-width: 0; }
+  .variant-card--section { background: linear-gradient(180deg, #fcfdfd 0%, #f8faf9 100%); }
+  .variant-card--soft { background: #fafbfc; }
+  .variant-card--nested { background: #ffffff; border-style: dashed; }
   .stack--tight { gap: 10px; }
   .option-value-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; }
   .color-groups { border: 1px solid #e1e5ea; border-radius: 8px; padding: 12px; display: grid; gap: 8px; }
@@ -1569,6 +1585,14 @@ const styles = `
   th, td { border-top: 1px solid #e1e5ea; text-align: left; padding: 10px; }
   .actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
   .empty, .muted { color: #616a75; margin: 0; }
+  .muted { line-height: 1.45; }
+  @media (max-width: 1180px) {
+    .image-row { grid-template-columns: 84px repeat(3, minmax(0, 1fr)); }
+    .image-row > button, .image-cover, .image-row__meta { grid-column: auto / span 1; }
+  }
+  @media (max-width: 960px) {
+    .image-row { grid-template-columns: 84px minmax(0, 1fr) minmax(0, 1fr); }
+  }
   @media (max-width: 760px) {
     .creator { padding: 12px; }
     .creator__header { display: grid; }
@@ -1577,7 +1601,8 @@ const styles = `
     .image-row img, .image-row > div:first-child { width: 100%; height: auto; aspect-ratio: 4 / 3; }
     .review dl { grid-template-columns: 1fr; }
     .dropzone, .upload-row, .variant-builder__header, .variant-card__header, .option-value-row { align-items: stretch; flex-direction: column; }
-    .variant-builder__actions { justify-content: stretch; }
+    .variant-builder__actions { justify-content: stretch; display: grid; }
+    .variant-builder, .variant-card { padding: 12px; }
   }
 `;
 
