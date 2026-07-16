@@ -628,6 +628,26 @@ function AccessoryStep({
         />
       </label>
 
+      <div className="variant-card">
+        <div className="variant-card__header">
+          <div>
+            <strong>Immagini prodotto</strong>
+            <p className="muted">
+              Puoi caricare immagini gallery anche se non usi la variante colore.
+            </p>
+          </div>
+        </div>
+        <DropZone fileInputRef={fileInputRef} limits={limits} onAddImages={onAddImages} />
+        <ImageRows
+          images={payload.images}
+          mode={colorOption ? "color" : "generic"}
+          onAutofillHex={onAutofillHex}
+          onRemove={onRemoveImage}
+          onUpdate={onUpdateImage}
+        />
+        {colorOption ? <ColorGroupSummary images={payload.images} /> : null}
+      </div>
+
       <div className="variant-builder">
         <div className="variant-builder__header">
           <div>
@@ -684,7 +704,7 @@ function AccessoryStep({
               <div>
                 <strong>Variante colore</strong>
                 <p className="muted">
-                  Usa lo stesso configuratore delle pellicole per creare i valori colore.
+                  Le immagini prodotto diventano anche valori della variante Colore.
                 </p>
               </div>
               <button
@@ -692,7 +712,6 @@ function AccessoryStep({
                   setPayload((current) => ({
                     ...current,
                     accessoryOptions: current.accessoryOptions.filter((option) => option.id !== colorOption.id),
-                    images: [],
                   }))
                 }
                 type="button"
@@ -700,14 +719,9 @@ function AccessoryStep({
                 Rimuovi colore
               </button>
             </div>
-            <DropZone fileInputRef={fileInputRef} limits={limits} onAddImages={onAddImages} />
-            <ImageRows
-              images={payload.images}
-              onAutofillHex={onAutofillHex}
-              onRemove={onRemoveImage}
-              onUpdate={onUpdateImage}
-            />
-            <ColorGroupSummary images={payload.images} />
+            <p className="muted">
+              Compila `Nome colore`, `Colore variante`, `HEX` e `SKU colore` direttamente nelle immagini qui sopra.
+            </p>
           </div>
         ) : null}
 
@@ -850,11 +864,13 @@ function DropZone({
 
 function ImageRows({
   images,
+  mode = "color",
   onAutofillHex,
   onRemove,
   onUpdate,
 }: {
   images: ColorImageInput[];
+  mode?: "color" | "generic";
   onAutofillHex: (id?: string) => void;
   onRemove: (id?: string) => void;
   onUpdate: (id: string | undefined, patch: Partial<ColorImageInput>) => void;
@@ -867,58 +883,66 @@ function ImageRows({
         <div className="image-row" key={image.id ?? image.fileName}>
           {image.dataUrl ? <img alt={image.colorName} src={image.dataUrl} /> : <div />}
           <label>
-            Nome colore
+            {mode === "color" ? "Nome colore" : "Titolo immagine"}
             <input
               onChange={(event) => onUpdate(image.id, { colorName: event.currentTarget.value })}
               value={image.colorName}
             />
           </label>
-          <label>
-            Colore variante
-            <input
-              onChange={(event) =>
-                onUpdate(image.id, { variantColorName: event.currentTarget.value })
-              }
-              value={image.variantColorName ?? variantColorNameFromImageTitle(image.colorName)}
-            />
-          </label>
-          <label>
-            Colore HEX
-            <div className="hex-field">
-              <span
-                aria-hidden="true"
-                className="hex-swatch"
-                style={{
-                  background: isValidHexColor(image.colorHex) ? normalizeHexColor(image.colorHex) : "#FFFFFF",
-                }}
-              />
-              <input
-                onChange={(event) =>
-                  onUpdate(image.id, { colorHex: normalizeHexColor(event.currentTarget.value) })
-                }
-                placeholder="#A36B43"
-                value={image.colorHex ?? ""}
-              />
-              <button onClick={() => onAutofillHex(image.id)} type="button">
-                Auto
-              </button>
+          {mode === "color" ? (
+            <>
+              <label>
+                Colore variante
+                <input
+                  onChange={(event) =>
+                    onUpdate(image.id, { variantColorName: event.currentTarget.value })
+                  }
+                  value={image.variantColorName ?? variantColorNameFromImageTitle(image.colorName)}
+                />
+              </label>
+              <label>
+                Colore HEX
+                <div className="hex-field">
+                  <span
+                    aria-hidden="true"
+                    className="hex-swatch"
+                    style={{
+                      background: isValidHexColor(image.colorHex) ? normalizeHexColor(image.colorHex) : "#FFFFFF",
+                    }}
+                  />
+                  <input
+                    onChange={(event) =>
+                      onUpdate(image.id, { colorHex: normalizeHexColor(event.currentTarget.value) })
+                    }
+                    placeholder="#A36B43"
+                    value={image.colorHex ?? ""}
+                  />
+                  <button onClick={() => onAutofillHex(image.id)} type="button">
+                    Auto
+                  </button>
+                </div>
+              </label>
+              <label>
+                SKU colore
+                <input
+                  onChange={(event) => onUpdate(image.id, { colorSku: event.currentTarget.value })}
+                  value={image.colorSku ?? ""}
+                />
+              </label>
+              <label className="check image-cover">
+                <input
+                  checked={Boolean(image.isColorCover)}
+                  onChange={() => onUpdate(image.id, { isColorCover: true })}
+                  type="radio"
+                />
+                Copertina colore
+              </label>
+            </>
+          ) : (
+            <div className="image-row__meta">
+              <span className="muted">{image.fileName}</span>
             </div>
-          </label>
-          <label>
-            SKU colore
-            <input
-              onChange={(event) => onUpdate(image.id, { colorSku: event.currentTarget.value })}
-              value={image.colorSku ?? ""}
-            />
-          </label>
-          <label className="check image-cover">
-            <input
-              checked={Boolean(image.isColorCover)}
-              onChange={() => onUpdate(image.id, { isColorCover: true })}
-              type="radio"
-            />
-            Copertina colore
-          </label>
+          )}
           <button onClick={() => onRemove(image.id)} type="button">
             Rimuovi
           </button>
